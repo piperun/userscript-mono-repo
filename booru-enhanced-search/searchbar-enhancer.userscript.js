@@ -133,16 +133,140 @@ sort:updated:desc
     }
 
     // --- Tag Management ---
+    function addTag(tag) {
+        if (!tag || tags.includes(tag)) return;
+        tags.push(tag);
+        tags = Array.from(new Set(tags));
+        renderTags(window.r34_tagList);
+    }
+
     function getTagsFromURL() {
         const params = new URLSearchParams(window.location.search);
         let tagString = params.get('tags') || '';
-        // Replace + with space, then split by space, filter out empty
-        return tagString.replace(/\+/g, ' ').split(/\s+/).filter(Boolean);
+        // Replace + with space
+        tagString = tagString.replace(/\+/g, ' ');
+        // Custom split: treat parenthesized groups and tags with parentheses as single tags
+        const tags = [];
+        let buffer = '';
+        let parenLevel = 0;
+        let inTag = false;
+        for (let i = 0; i < tagString.length; ++i) {
+            const c = tagString[i];
+            if (c === '(' && !inTag) {
+                if (parenLevel === 0 && buffer.trim()) {
+                    tags.push(buffer.trim());
+                    buffer = '';
+                }
+                parenLevel++;
+                buffer += c;
+            } else if (c === ')' && parenLevel > 0) {
+                buffer += c;
+                parenLevel--;
+                if (parenLevel === 0) {
+                    tags.push(buffer.trim());
+                    buffer = '';
+                }
+            } else if (c === ' ' && parenLevel === 0) {
+                if (buffer.trim()) {
+                    tags.push(buffer.trim());
+                    buffer = '';
+                }
+            } else {
+                buffer += c;
+            }
+        }
+        if (buffer.trim()) tags.push(buffer.trim());
+        return tags.filter(Boolean);
     }
 
     function renderTags(tagList) {
+        // Always get from window to avoid ReferenceError
+        const metatagList = window.r34_metatagList;
+        const metatagRowWrap = window.r34_metatagRowWrap;
+        // Defensive: ensure tags are unique before rendering
+        const uniqueTags = Array.from(new Set(tags));
+        if (metatagList && metatagRowWrap) {
+            metatagList.innerHTML = '';
+            // Only show metatag row if there are metatags
+            const metatagRegex = /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/;
+            const metatags = uniqueTags.filter(tag => metatagRegex.test(tag));
+            if (metatags.length > 0) {
+                metatagRowWrap.style.display = '';
+                metatags.forEach((tag, idx) => {
+                    const tagEl = document.createElement('span');
+                    tagEl.className = 'r34-tag-item r34-metatag-item';
+                    tagEl.textContent = tag;
+                    const removeBtn = document.createElement('span');
+                    removeBtn.className = 'r34-remove-tag';
+                    removeBtn.textContent = '×';
+                    removeBtn.onclick = () => {
+                        // Remove from tags and update UI controls as before
+                        const tagIdx = tags.indexOf(tag);
+                        if (tagIdx !== -1) {
+                            tags.splice(tagIdx, 1);
+                            renderTags(tagList);
+                        }
+                    };
+                    tagEl.appendChild(removeBtn);
+                    metatagList.appendChild(tagEl);
+                });
+            } else {
+                metatagRowWrap.style.display = 'none';
+            }
+        }
+        // --- Bi-directional sync: update UI controls from metatags ---
+        // Find sort and rating metatags
+        let sortType = '';
+        let sortOrder = 'desc';
+        let foundSort = false;
+        let ratingsSet = new Set();
+        const metatagRegex = /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/;
+        uniqueTags.forEach(tag => {
+            // sort:<type>:<order>
+            const sortMatch = tag.match(/^sort:([a-z_]+):(asc|desc)$/);
+            if (sortMatch) {
+                sortType = sortMatch[1];
+                sortOrder = sortMatch[2];
+                foundSort = true;
+            }
+            // rating:<value>
+            const ratingMatch = tag.match(/^rating:(safe|questionable|explicit)$/);
+            if (ratingMatch) {
+                ratingsSet.add(ratingMatch[1]);
+            }
+            // ( rating:type ~ rating:type )
+            const ratingOrMatch = tag.match(/^\(\s*([^)]+)\s*\)$/);
+            if (ratingOrMatch) {
+                // Split by ~ and extract rating values
+                const parts = ratingOrMatch[1].split('~').map(s => s.trim());
+                parts.forEach(part => {
+                    const m = part.match(/^rating:(safe|questionable|explicit)$/);
+                    if (m) ratingsSet.add(m[1]);
+                });
+            }
+        });
+        // Update sort dropdown
+        if (typeof sortSelect !== 'undefined') {
+            sortSelect.value = foundSort ? sortType : '';
+            // Show/hide order switch
+            if (foundSort) {
+                orderSwitch.style.display = '';
+                orderSwitch.dataset.state = sortOrder;
+                orderSwitch.textContent = sortOrder === 'asc' ? 'Order: Ascend \u2191' : 'Order: Descend \u2193';
+            } else {
+                orderSwitch.style.display = 'none';
+            }
+        }
+        // Update rating checkboxes
+        if (typeof sortRow !== 'undefined') {
+            sortRow.querySelectorAll('.r34-rating-checkbox').forEach(cb => {
+                cb.checked = ratingsSet.has(cb.value);
+            });
+        }
+        // --- Render only non-metatag tag pills in the main tag list ---
         tagList.innerHTML = '';
-        tags.forEach((tag, idx) => {
+        uniqueTags.forEach((tag, idx) => {
+            if (metatagRegex.test(tag)) return; // skip metatags in main tag list
             const tagEl = document.createElement('span');
             tagEl.className = 'r34-tag-item';
             tagEl.textContent = tag;
@@ -150,8 +274,26 @@ sort:updated:desc
             removeBtn.className = 'r34-remove-tag';
             removeBtn.textContent = '×';
             removeBtn.onclick = () => {
-                tags.splice(idx, 1);
+                // --- Bi-directional sync: update UI controls when metatag pill is removed ---
+                // If removing a sort or rating metatag, update UI controls
+                if (/^sort:[a-z_]+:(asc|desc)$/.test(tag)) {
+                    if (typeof sortSelect !== 'undefined') {
+                        sortSelect.value = '';
+                        orderSwitch.style.display = 'none';
+                    }
+                }
+                if (/^rating:(safe|questionable|explicit)$/.test(tag)) {
+                    if (typeof sortRow !== 'undefined') {
+                        sortRow.querySelectorAll('.r34-rating-checkbox').forEach(cb => {
+                            if (cb.value === tag.split(':')[1]) cb.checked = false;
+                        });
+                    }
+                }
+                const tagIdx = tags.indexOf(tag);
+                if (tagIdx !== -1) {
+                    tags.splice(tagIdx, 1);
                 renderTags(tagList);
+                }
             };
             tagEl.appendChild(removeBtn);
             tagList.appendChild(tagEl);
@@ -392,8 +534,107 @@ sort:updated:desc
         searchButton.textContent = 'Search';
         searchButton.className = 'r34-search-button';
 
+        // --- New Sort/Order/Ratings Row ---
+        const sortRow = document.createElement('div');
+        sortRow.className = 'r34-sort-row';
+        // Sort dropdown
+        const sortSelect = document.createElement('select');
+        sortSelect.className = 'r34-sort-select';
+        const emptyOption = document.createElement('option');
+        emptyOption.value = '';
+        emptyOption.textContent = 'Sort';
+        sortSelect.appendChild(emptyOption);
+        // Example sort options (add more as needed)
+        const sortOptions = [
+            { value: 'score', label: 'Score' },
+            { value: 'updated', label: 'Updated' },
+            { value: 'id', label: 'ID' },
+            { value: 'rating', label: 'Rating' },
+            { value: 'user', label: 'User' },
+            { value: 'height', label: 'Height' },
+            { value: 'width', label: 'Width' },
+            { value: 'parent', label: 'Parent' },
+            { value: 'source', label: 'Source' }
+        ];
+        sortOptions.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.textContent = opt.label;
+            sortSelect.appendChild(option);
+        });
+        sortRow.appendChild(sortSelect);
+        // Order switch
+        const orderSwitch = document.createElement('button');
+        orderSwitch.type = 'button';
+        orderSwitch.className = 'r34-order-switch';
+        orderSwitch.dataset.state = 'desc'; // default to desc
+        orderSwitch.textContent = 'Order: Descend \u2193';
+        orderSwitch.style.display = 'none'; // hidden by default
+        orderSwitch.onclick = function() {
+            // Cycle through: desc -> asc -> desc
+            const state = orderSwitch.dataset.state;
+            if (state === 'desc') {
+                orderSwitch.dataset.state = 'asc';
+                orderSwitch.textContent = 'Order: Ascend \u2191';
+            } else {
+                orderSwitch.dataset.state = 'desc';
+                orderSwitch.textContent = 'Order: Descend \u2193';
+            }
+        };
+        sortRow.appendChild(orderSwitch);
+        // Show/hide order switch based on sort selection
+        sortSelect.addEventListener('change', function() {
+            if (sortSelect.value) {
+                orderSwitch.style.display = '';
+            } else {
+                orderSwitch.style.display = 'none';
+            }
+        });
+        // Ratings checkboxes
+        const ratings = [
+            { value: 'safe', label: 'Safe' },
+            { value: 'questionable', label: 'Questionable' },
+            { value: 'explicit', label: 'Explicit' }
+        ];
+        ratings.forEach(r => {
+            const label = document.createElement('label');
+            label.className = 'r34-rating-label';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = r.value;
+            checkbox.className = 'r34-rating-checkbox';
+            label.appendChild(checkbox);
+            label.appendChild(document.createTextNode(' ' + r.label));
+            sortRow.appendChild(label);
+        });
+
         const tagList = document.createElement('div');
         tagList.className = 'r34-tag-list';
+
+        // --- Metatag Row ---
+        const metatagRowWrap = document.createElement('div');
+        metatagRowWrap.className = 'r34-metatag-row-wrap';
+        const metatagRowHeader = document.createElement('div');
+        metatagRowHeader.className = 'r34-metatag-row-header';
+        const metatagRowTitle = document.createElement('span');
+        metatagRowTitle.textContent = 'Metatags';
+        const metatagToggle = document.createElement('button');
+        metatagToggle.type = 'button';
+        metatagToggle.className = 'r34-metatag-toggle';
+        metatagToggle.textContent = 'See more';
+        metatagRowHeader.appendChild(metatagRowTitle);
+        metatagRowHeader.appendChild(metatagToggle);
+        const metatagList = document.createElement('div');
+        metatagList.className = 'r34-metatag-list';
+        metatagRowWrap.appendChild(metatagRowHeader);
+        metatagRowWrap.appendChild(metatagList);
+        let metatagExpanded = false;
+        metatagList.style.display = 'none';
+        metatagToggle.onclick = function() {
+            metatagExpanded = !metatagExpanded;
+            metatagList.style.display = metatagExpanded ? '' : 'none';
+            metatagToggle.textContent = metatagExpanded ? 'See less' : 'See more';
+        };
 
         // Track if user is navigating autocomplete with arrow keys
         let autocompleteNavigating = false;
@@ -407,14 +648,16 @@ sort:updated:desc
         });
         searchInput.addEventListener('input', function(e) {
             autocompleteNavigating = false;
-            // Existing separator logic
             let value = searchInput.value;
-            if (/[,\s]$/.test(value)) {
-                value = value.replace(/[,\s]+$/, '').trim();
-                if (value && !tags.includes(value)) {
-                    tags.push(value);
-                    renderTags(tagList);
-                }
+            // Only split on comma or space if not inside parentheses
+            const endsWithSeparator = /[ ,]$/.test(value);
+            // Count open/close parentheses
+            const openParens = (value.match(/\(/g) || []).length;
+            const closeParens = (value.match(/\)/g) || []).length;
+            const balanced = openParens === closeParens;
+            if (endsWithSeparator && balanced) {
+                value = value.replace(/[ ,]+$/, '').trim();
+                addTag(value);
                 searchInput.value = '';
             }
         });
@@ -434,10 +677,7 @@ sort:updated:desc
                     // No suggestion selected, add raw input as tag
                     e.preventDefault();
                     const value = searchInput.value.trim();
-                    if (value && !tags.includes(value)) {
-                        tags.push(value);
-                        renderTags(tagList);
-                    }
+                    addTag(value);
                     searchInput.value = '';
                     autocompleteNavigating = false;
                     // Close/hide autocomplete dropdown
@@ -455,6 +695,26 @@ sort:updated:desc
 
         function bindFormEvents() {
         searchForm.addEventListener('submit', function(e) {
+            // --- Inject metatags from UI controls ---
+            let metatags = [];
+            // Sort + Order (single metatag)
+            if (sortSelect.value) {
+                let order = orderSwitch.dataset.state || 'desc';
+                metatags.push(`sort:${sortSelect.value}:${order}`);
+            }
+            // Ratings (OR logic)
+            const checkedRatings = Array.from(sortRow.querySelectorAll('.r34-rating-checkbox:checked')).map(cb => cb.value);
+            if (checkedRatings.length === 1) {
+                metatags.push(`rating:${checkedRatings[0]}`);
+            } else if (checkedRatings.length > 1) {
+                metatags.push('( ' + checkedRatings.map(r => `rating:${r}`).join(' ~ ') + ' )');
+            }
+            // Remove any existing metatags of these types from tags
+            const metatagPrefixes = ['sort:', 'rating:','( rating:'];
+            tags = tags.filter(tag => !metatagPrefixes.some(prefix => tag.startsWith(prefix)));
+            // Add new metatags
+            tags = [...tags, ...metatags];
+            // Update input value for submission
             if (tags.length > 0) {
                 searchInput.value = tags.join(' ');
             }
@@ -466,14 +726,41 @@ sort:updated:desc
         if (site === 'rule34') {
             searchInput.addEventListener('awesomplete-selectcomplete', function(e) {
                 const value = searchInput.value.trim();
-                if (value && !tags.includes(value)) {
-                    tags.push(value);
-                    renderTags(tagList);
-                }
+                addTag(value);
                 searchInput.value = '';
             });
         }
         }
+
+        // --- Sync metatags with UI changes ---
+        function syncMetatagsFromUI() {
+            // Remove all sort: and rating: metatags (including parenthesized OR metatags and single rating: ones)
+            tags = tags.filter(tag => {
+                if (tag.startsWith('sort:')) return false;
+                if (/^rating:(safe|questionable|explicit)$/.test(tag)) return false;
+                if (/^\(\s*rating:(safe|questionable|explicit)(\s*~\s*rating:(safe|questionable|explicit))*\s*\)$/.test(tag)) return false;
+                return true;
+            });
+            // Add sort metatag if selected
+            if (sortSelect.value) {
+                let order = orderSwitch.dataset.state || 'desc';
+                tags.push(`sort:${sortSelect.value}:${order}`);
+            }
+            // Add rating metatag(s) with OR logic
+            const checkedRatings = Array.from(sortRow.querySelectorAll('.r34-rating-checkbox:checked')).map(cb => cb.value);
+            if (checkedRatings.length === 1) {
+                tags.push(`rating:${checkedRatings[0]}`);
+            } else if (checkedRatings.length > 1) {
+                tags.push('( ' + checkedRatings.map(r => `rating:${r}`).join(' ~ ') + ' )');
+            }
+            tags = Array.from(new Set(tags));
+            renderTags(tagList);
+        }
+        sortSelect.addEventListener('change', syncMetatagsFromUI);
+        orderSwitch.addEventListener('click', syncMetatagsFromUI);
+        sortRow.querySelectorAll('.r34-rating-checkbox').forEach(cb => {
+            cb.addEventListener('change', syncMetatagsFromUI);
+        });
 
         // --- Assemble ---
         searchBarContainer.appendChild(exportBtn);
@@ -481,15 +768,22 @@ sort:updated:desc
         searchBarContainer.appendChild(cheatBtn);
         searchBarContainer.appendChild(searchButton);
         searchForm.appendChild(searchBarContainer);
+        // Insert the new row below the search bar, above the tag list
+        searchForm.appendChild(sortRow);
         centerWrap.appendChild(searchForm);
         centerWrap.appendChild(tagList);
+        centerWrap.appendChild(metatagRowWrap);
 
         // --- Bind Events ---
         bindInputEvents();
         bindFormEvents();
         bindAwesompleteEvents();
 
-        return { centerWrap, searchForm, searchInput, searchButton, tagList };
+        // Make tagList, metatagList and metatagRowWrap globally accessible for addTag/renderTags
+        window.r34_tagList = tagList;
+        window.r34_metatagList = metatagList;
+        window.r34_metatagRowWrap = metatagRowWrap;
+        return { centerWrap, searchForm, searchInput, searchButton, tagList, metatagList, metatagRowWrap };
     }
 
     // --- Site-Specific Setup ---
@@ -499,7 +793,7 @@ sort:updated:desc
         if (!originalForm || !gallery) return;
         const formAction = originalForm.action;
         const formMethod = originalForm.method;
-        const { centerWrap, searchForm, searchInput, searchButton, tagList } = createSearchSection('e621');
+        const { centerWrap, searchForm, searchInput, searchButton, tagList, metatagList, metatagRowWrap } = createSearchSection('e621');
         searchForm.action = formAction;
         searchForm.method = formMethod;
         gallery.parentNode.insertBefore(centerWrap, gallery);
@@ -518,7 +812,7 @@ sort:updated:desc
         if (!originalForm || !gallery) return;
         const formAction = originalForm.action;
         const formMethod = originalForm.method;
-        const { centerWrap, searchForm, searchInput, searchButton, tagList } = createSearchSection('rule34');
+        const { centerWrap, searchForm, searchInput, searchButton, tagList, metatagList, metatagRowWrap } = createSearchSection('rule34');
         searchForm.action = formAction;
         searchForm.method = formMethod;
         gallery.parentNode.insertBefore(centerWrap, gallery);
@@ -920,7 +1214,7 @@ sort:updated:desc
                         height: auto;
                         max-height: 100%;
                     }
-                }
+        }
         /* e621.net coloring */
         body.c-posts.a-index.resp .r34-tag-item {
             background: var(--color-tag-general, #e6f7ff);
@@ -935,6 +1229,138 @@ sort:updated:desc
             body#body .r34-search-input {
                 width: 100vw;
                 max-width: 100vw;
+            }
+        }
+        .r34-sort-row {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 18px;
+            width: 100%;
+            margin: 8px 0 0 0;
+            justify-content: flex-start;
+        }
+        .r34-sort-select {
+            border-radius: 14px;
+            padding: 7px 18px;
+            font-size: 1.08em;
+            border: 2px solid #b0d0b0;
+            background: #f8fff8;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            min-width: 90px;
+            max-width: 180px;
+        }
+        .r34-sort-select:focus {
+            border-color: #4a90e2;
+            outline: none;
+        }
+        .r34-order-switch {
+            border-radius: 14px;
+            padding: 7px 18px;
+            font-size: 1.08em;
+            border: 2px solid #b0d0b0;
+            background: #f8fff8;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            font-weight: 500;
+            color: #00549e;
+            min-width: 120px;
+        }
+        .r34-order-switch:focus {
+            border-color: #4a90e2;
+            outline: none;
+        }
+        .r34-order-switch[style*="display: none"] {
+            display: none !important;
+        }
+        .r34-rating-label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 1.08em;
+            font-weight: 500;
+            color: #00549e;
+            background: #e6f7ff;
+            border-radius: 10px;
+            padding: 4px 12px;
+            border: 1.5px solid #b0d0b0;
+            margin-right: 4px;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .r34-rating-checkbox {
+            accent-color: #4a90e2;
+            width: 1.1em;
+            height: 1.1em;
+        }
+        .r34-rating-label:hover {
+            background: #d0eaff;
+            border-color: #4a90e2;
+        }
+        /* Metatag Row */
+        .r34-metatag-row-wrap {
+            width: 100%;
+            margin: 10px 0 0 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .r34-metatag-row-header {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.08em;
+            font-weight: 600;
+            color: #00549e;
+            margin-bottom: 2px;
+        }
+        .r34-metatag-toggle {
+            border-radius: 10px;
+            padding: 4px 16px;
+            font-size: 1em;
+            border: 2px solid #b0d0b0;
+            background: #f8fff8;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            font-weight: 500;
+            color: #00549e;
+        }
+        .r34-metatag-toggle:focus {
+            border-color: #4a90e2;
+            outline: none;
+        }
+        .r34-metatag-list {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 10px;
+            width: 100%;
+            margin-top: 2px;
+            justify-content: center;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .r34-metatag-item {
+            background: #e6f7ff;
+            border: 1.5px solid #7ecfff;
+            color: #00549e;
+        }
+        @media (max-width: 700px) {
+            .r34-sort-row {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+            .r34-metatag-row-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+            }
+            .r34-metatag-list {
+                gap: 6px;
             }
         }
     `;

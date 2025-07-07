@@ -3,7 +3,8 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.9
 // @description  Modernize and enhance search bar and tag input for booru sites, with site-specific styles, auto-contrast, and improved layout for rule34.xxx and e621.net
-// @author       You
+// @author       Piperun
+// @license      LGPL-3.0-or-later
 // @match        *://*.booru.org/*
 // @match        *://*.booru.com/*
 // @match        *://*.booru.ca/*

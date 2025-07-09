@@ -2,4 +2,4 @@
 *.html
 *.erb
 *.css
-!*.userscript.js
+!*.user.js

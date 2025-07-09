@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Booru Search Tag Enhancer (Universal)
 // @namespace    http://tampermonkey.net/
-// @version      1.9
-// @description  Modernize and enhance search bar and tag input for booru sites, with site-specific styles, auto-contrast, and improved layout for rule34.xxx and e621.net
+// @version      2.0
+// @description  Modernize and enhance search bar and tag input for booru sites, with modular site-specific configurations, dynamic cheat sheets, and improved layout for rule34.xxx and e621.net
 // @author       Piperun
 // @license      LGPL-3.0-or-later
 // @match        *://*.booru.org/*
@@ -34,8 +34,178 @@
 (function main() {
     'use strict';
 
+// --- Configuration ---
+    const SITE_CONFIG = {
+        "e621.net": {
+            placeholder: "Enter tags...",
+            sortOptions: [
+                { value: 'score', label: 'Score' },
+                { value: 'favcount', label: 'Favorites' },
+                { value: 'comment_count', label: 'Comments' },
+                { value: 'id', label: 'ID' },
+                { value: 'mpixels', label: 'Megapixels' },
+                { value: 'filesize', label: 'File Size' },
+                { value: 'landscape', label: 'Landscape' },
+                { value: 'portrait', label: 'Portrait' },
+                { value: 'created', label: 'Created' },
+                { value: 'updated', label: 'Updated' },
+                { value: 'tagcount', label: 'Tag Count' },
+                { value: 'duration', label: 'Duration' },
+                { value: 'random', label: 'Random' }
+            ],
+            ratings: [
+                { value: 'safe', label: 'Safe' },
+                { value: 'questionable', label: 'Questionable' },
+                { value: 'explicit', label: 'Explicit' }
+            ],
+            metatagRegex: /^(order:|rating:|user:|parent:|score:|md5:|width:|height:|source:|id:|favcount:|comment_count:|type:|date:|status:|\( rating:)/,
+            cheatSheetContent: `
+                <section><h4>Basic Search</h4>
+                    <ul>
+                        <li><code>cat dog</code> — Posts with <b>cat</b> and <b>dog</b></li>
+                        <li><code>~cat ~dog</code> — Posts with <b>cat</b> or <b>dog</b></li>
+                        <li><code>-cat</code> — Posts without <b>cat</b></li>
+                        <li><code>cat*</code> — Tags starting with <b>cat</b></li>
+                        <li><code>( ~cat ~dog )</code> — Grouped OR search</li>
+                    </ul>
+                </section>
+                <section><h4>Metatags</h4>
+                    <ul>
+                        <li><code>user:username</code> — Posts by user</li>
+                        <li><code>rating:safe</code> — Safe rated posts</li>
+                        <li><code>score:>=10</code> — Score 10 or higher</li>
+                        <li><code>favcount:>=100</code> — 100+ favorites</li>
+                        <li><code>width:>=1920</code> — Width 1920px or more</li>
+                        <li><code>height:>=1080</code> — Height 1080px or more</li>
+                        <li><code>type:webm</code> — WebM videos</li>
+                        <li><code>type:gif</code> — GIF images</li>
+                        <li><code>id:12345</code> — Post with ID 12345</li>
+                        <li><code>md5:abc123</code> — Post with MD5 hash</li>
+                        <li><code>parent:12345</code> — Has parent post 12345</li>
+                        <li><code>source:*example.com</code> — Source contains example.com</li>
+                    </ul>
+                </section>
+                <section><h4>Sorting</h4>
+                    <ul>
+                        <li><code>order:score</code> — Sort by score (desc)</li>
+                        <li><code>order:score_asc</code> — Sort by score (asc)</li>
+                        <li><code>order:favcount</code> — Sort by favorites</li>
+                        <li><code>order:id</code> — Sort by ID (newest first)</li>
+                        <li><code>order:random</code> — Random order</li>
+                    </ul>
+                </section>
+                <section><h4>Date Ranges</h4>
+                    <ul>
+                        <li><code>date:today</code> — Posts from today</li>
+                        <li><code>date:week</code> — Posts from last 7 days</li>
+                        <li><code>date:month</code> — Posts from last 30 days</li>
+                        <li><code>date:2023-01-01</code> — Posts from specific date</li>
+                        <li><code>date:2023-01-01..2023-12-31</code> — Date range</li>
+                    </ul>
+                </section>
+            `
+        },
+        "rule34.xxx": {
+            placeholder: "Enter tags...",
+            sortOptions: [
+                { value: 'score', label: 'Score' },
+                { value: 'updated', label: 'Updated' },
+                { value: 'id', label: 'ID' },
+                { value: 'rating', label: 'Rating' },
+                { value: 'user', label: 'User' },
+                { value: 'height', label: 'Height' },
+                { value: 'width', label: 'Width' },
+                { value: 'parent', label: 'Parent' },
+                { value: 'source', label: 'Source' }
+            ],
+            ratings: [
+                { value: 'safe', label: 'Safe' },
+                { value: 'questionable', label: 'Questionable' },
+                { value: 'explicit', label: 'Explicit' }
+            ],
+            metatagRegex: /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/,
+            cheatSheetContent: `
+                <section><h4>Basic Search</h4>
+                    <ul>
+                        <li><code>tag1 tag2</code> — Posts with <b>tag1</b> and <b>tag2</b></li>
+                        <li><code>( tag1 ~ tag2 )</code> — Posts with <b>tag1</b> or <b>tag2</b></li>
+                        <li><code>-tag1</code> — Posts without <b>tag1</b></li>
+                        <li><code>ta*1</code> — Tags starting with <b>ta</b> and ending with <b>1</b></li>
+                    </ul>
+                </section>
+                <section><h4>Metatags</h4>
+                    <ul>
+                        <li><code>user:bob</code> — Posts by user <b>bob</b></li>
+                        <li><code>rating:questionable</code> — Rated <b>questionable</b></li>
+                        <li><code>score:>=10</code> — Score 10 or higher</li>
+                        <li><code>width:>=1000</code> — Width 1000px or more</li>
+                        <li><code>height:>1000</code> — Height greater than 1000px</li>
+                        <li><code>parent:1234</code> — Has parent <b>1234</b></li>
+                        <li><code>md5:foo</code> — Posts with MD5 hash <b>foo</b></li>
+                    </ul>
+                </section>
+                <section><h4>Sorting</h4>
+                    <ul>
+                        <li><code>sort:updated:desc</code> — Sort by updated (descending)</li>
+                        <li><code>sort:score:asc</code> — Sort by score (ascending)</li>
+                        <li>Other types: <code>id</code>, <code>rating</code>, <code>user</code>, <code>height</code>, <code>width</code>, <code>parent</code>, <code>source</code></li>
+                    </ul>
+                </section>
+            `
+        },
+        "default": {
+            placeholder: "Enter tags...",
+            sortOptions: [
+                { value: 'score', label: 'Score' },
+                { value: 'updated', label: 'Updated' },
+                { value: 'id', label: 'ID' },
+                { value: 'rating', label: 'Rating' },
+                { value: 'user', label: 'User' },
+                { value: 'height', label: 'Height' },
+                { value: 'width', label: 'Width' },
+                { value: 'parent', label: 'Parent' },
+                { value: 'source', label: 'Source' }
+            ],
+            ratings: [
+                { value: 'safe', label: 'Safe' },
+                { value: 'questionable', label: 'Questionable' },
+                { value: 'explicit', label: 'Explicit' }
+            ],
+            metatagRegex: /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/,
+            cheatSheetContent: `
+                <section><h4>Basic Search</h4>
+                    <ul>
+                        <li><code>tag1 tag2</code> — Posts with <b>tag1</b> and <b>tag2</b></li>
+                        <li><code>( tag1 ~ tag2 )</code> — Posts with <b>tag1</b> or <b>tag2</b></li>
+                        <li><code>-tag1</code> — Posts without <b>tag1</b></li>
+                        <li><code>ta*1</code> — Tags starting with <b>ta</b> and ending with <b>1</b></li>
+                    </ul>
+                </section>
+                <section><h4>Metatags</h4>
+                    <ul>
+                        <li><code>user:bob</code> — Posts by user <b>bob</b></li>
+                        <li><code>rating:questionable</code> — Rated <b>questionable</b></li>
+                        <li><code>score:>=10</code> — Score 10 or higher</li>
+                        <li><code>width:>=1000</code> — Width 1000px or more</li>
+                        <li><code>height:>1000</code> — Height greater than 1000px</li>
+                        <li><code>parent:1234</code> — Has parent <b>1234</b></li>
+                        <li><code>md5:foo</code> — Posts with MD5 hash <b>foo</b></li>
+                    </ul>
+                </section>
+                <section><h4>Sorting</h4>
+                    <ul>
+                        <li><code>sort:updated:desc</code> — Sort by updated (descending)</li>
+                        <li><code>sort:score:asc</code> — Sort by score (ascending)</li>
+                        <li>Other types: <code>id</code>, <code>rating</code>, <code>user</code>, <code>height</code>, <code>width</code>, <code>parent</code>, <code>source</code></li>
+                    </ul>
+                </section>
+            `
+        }
+    };
+
     // --- State ---
     let tags = [];
+    const siteConfig = SITE_CONFIG[location.hostname] || SITE_CONFIG['default'];
     const isE621 = location.hostname.endsWith('e621.net');
     const isRule34 = location.hostname.endsWith('rule34.xxx');
 
@@ -69,55 +239,19 @@
 
     loadSettings();
 
-    // --- Cheat Sheet Content ---
-    const CHEAT_SHEET = `
-tag1 tag2
-    Search for posts that have tag1 and tag2.
-( tag1 ~ tag2 )
-    Search for posts that have tag1 or tag2. The braces are important to group the tags between which the "or" counts. The spaces between the braces and tags are also important because some tags end in braces!
-night~
-    Fuzzy search for the tag night. This will return results such as night fight bright and so on according to the Levenshtein distance.
--tag1
-    Search for posts that don't have tag1.
-ta*1
-    Search for posts with tags that starts with ta and ends with 1.
-user:bob
-    Search for posts uploaded by the user Bob.
-md5:foo
-    Search for posts with the MD5 hash foo.
-md5:foo*
-    Search for posts whose MD5 starts with the MD5 hash foo. 
-rating:questionable
-    Search for posts that are rated questionable.
--rating:questionable
-    Search for posts that are not rated questionable.
-parent:1234
-    Search for posts that have 1234 as a parent (and include post 1234).
-rating:questionable rating:safe
-    In general, combining the same metatags (the ones that have colons in them) will not work.
-rating:questionable parent:100
-    You can combine different metatags, however.
-width:>=1000 height:>1000
-    Find images with a width greater than or equal to 1000 and a height greater than 1000.
-score:>=10
-    Find images with a score greater than or equal to 10. This value is updated once daily at 12AM CST.
-sort:updated:desc
-    Sort posts by their most recently updated order.
-
-    Other sortable types:
-
-        id
-        score
-        rating
-        user
-        height
-        width
-        parent
-        source
-        updated 
-
-    Can be sorted by both asc or desc. 
-`;
+    // --- Site Configuration Helper ---
+    function addSiteConfig(hostname, config) {
+        SITE_CONFIG[hostname] = config;
+    }
+    
+    // Example usage to add a new site:
+    // addSiteConfig('newsite.com', {
+    //     placeholder: "Search tags...",
+    //     sortOptions: [{ value: 'date', label: 'Date' }],
+    //     ratings: [{ value: 'sfw', label: 'Safe for Work' }],
+    //     metatagRegex: /^(category:|type:)/,
+    //     cheatSheetContent: `<section><h4>Custom Help</h4>...</section>`
+    // });
 
     // --- Color/Theme Helpers ---
     function getContrastYIQ(hexcolor) {
@@ -220,8 +354,8 @@ sort:updated:desc
 
         // Defensive: ensure tags are unique before rendering
         const uniqueTags = Array.from(new Set(tags));
-        // Declare metatagRegex only once
-        const metatagRegex = /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/;
+        // Use site-specific metatag regex or fallback to default
+        const metatagRegex = siteConfig.metatagRegex || /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/;
 
         // --- Render include/exclude rows ---
         if (includeList) includeList.innerHTML = '';
@@ -615,7 +749,9 @@ sort:updated:desc
         // Structured documentation-style cheat sheet
         const docWrap = document.createElement('div');
         docWrap.className = 'modal-doc';
-        docWrap.innerHTML = `
+        
+        // Use site-specific content or fallback to generic content
+        const cheatSheetContent = siteConfig.cheatSheetContent || `
           <section><h4>Basic Search</h4>
             <ul>
               <li><code>tag1 tag2</code> — Posts with <b>tag1</b> and <b>tag2</b></li>
@@ -651,6 +787,9 @@ sort:updated:desc
             </ul>
           </section>
         `;
+        
+        docWrap.innerHTML = cheatSheetContent;
+        
         const closeBtn = document.createElement('button');
         closeBtn.textContent = 'Close';
         closeBtn.type = 'button';
@@ -680,13 +819,13 @@ sort:updated:desc
             searchInput.id = 'tags';
             searchInput.name = 'tags';
             searchInput.setAttribute('data-autocomplete', 'tag-query');
-            searchInput.placeholder = 'Enter tags...';
+            searchInput.placeholder = siteConfig.placeholder || 'Enter tags...';
             searchInput.className = 'r34-search-input';
         } else {
             searchInput = document.createElement('input');
             searchInput.type = 'text';
             searchInput.name = 'tags';
-            searchInput.placeholder = 'Enter tags...';
+            searchInput.placeholder = siteConfig.placeholder || 'Enter tags...';
             searchInput.className = 'r34-search-input';
         }
 
@@ -727,8 +866,8 @@ sort:updated:desc
         emptyOption.value = '';
         emptyOption.textContent = 'Sort';
         sortSelect.appendChild(emptyOption);
-        // Example sort options (add more as needed)
-        const sortOptions = [
+        // Use site-specific sort options or fallback to defaults
+        const sortOptions = siteConfig.sortOptions || [
             { value: 'score', label: 'Score' },
             { value: 'updated', label: 'Updated' },
             { value: 'id', label: 'ID' },
@@ -774,7 +913,7 @@ sort:updated:desc
             }
         });
         // Ratings checkboxes
-        const ratings = [
+        const ratings = siteConfig.ratings || [
             { value: 'safe', label: 'Safe' },
             { value: 'questionable', label: 'Questionable' },
             { value: 'explicit', label: 'Explicit' }

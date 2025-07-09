@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Booru Search Tag Enhancer (Universal)
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  Modernize and enhance search bar and tag input for booru sites, with modular site-specific configurations, dynamic cheat sheets, and improved layout for rule34.xxx and e621.net
+// @version      2.1
+// @description  Modernize and enhance search bar and tag input for booru sites, with modular site-specific configurations, dynamic cheat sheets with caching, e621-specific order syntax, and improved layout for rule34.xxx and e621.net
 // @author       Piperun
 // @license      LGPL-3.0-or-later
 // @match        *://*.booru.org/*
@@ -60,47 +60,164 @@
             ],
             metatagRegex: /^(order:|rating:|user:|parent:|score:|md5:|width:|height:|source:|id:|favcount:|comment_count:|type:|date:|status:|\( rating:)/,
             cheatSheetContent: `
-                <section><h4>Basic Search</h4>
+                <section><h4>Basics</h4>
                     <ul>
-                        <li><code>cat dog</code> — Posts with <b>cat</b> and <b>dog</b></li>
-                        <li><code>~cat ~dog</code> — Posts with <b>cat</b> or <b>dog</b></li>
-                        <li><code>-cat</code> — Posts without <b>cat</b></li>
-                        <li><code>cat*</code> — Tags starting with <b>cat</b></li>
-                        <li><code>( ~cat ~dog )</code> — Grouped OR search</li>
-                    </ul>
-                </section>
-                <section><h4>Metatags</h4>
-                    <ul>
-                        <li><code>user:username</code> — Posts by user</li>
-                        <li><code>rating:safe</code> — Safe rated posts</li>
-                        <li><code>score:>=10</code> — Score 10 or higher</li>
-                        <li><code>favcount:>=100</code> — 100+ favorites</li>
-                        <li><code>width:>=1920</code> — Width 1920px or more</li>
-                        <li><code>height:>=1080</code> — Height 1080px or more</li>
-                        <li><code>type:webm</code> — WebM videos</li>
-                        <li><code>type:gif</code> — GIF images</li>
-                        <li><code>id:12345</code> — Post with ID 12345</li>
-                        <li><code>md5:abc123</code> — Post with MD5 hash</li>
-                        <li><code>parent:12345</code> — Has parent post 12345</li>
-                        <li><code>source:*example.com</code> — Source contains example.com</li>
+                        <li><code>cat dog</code> — Search for posts that are tagged with both cat and dog. Tags are separated by spaces.</li>
+                        <li><code>red_panda african_wild_dog</code> — Words within each tag are separated by underscores.</li>
+                        <li><code>~cat ~dog</code> — Search for posts that are tagged either cat or dog (or both). May not work well when combined with other syntaxes.</li>
+                        <li><code>-chicken</code> — Search for posts that don't have the chicken tag.</li>
+                        <li><code>fox -chicken</code> — Search for posts that are tagged with fox and are not tagged with chicken.</li>
+                        <li><code>african_*</code> — Search for posts with any tag that starts with african_, such as african_wild_dog or african_golden_cat. May not work well when combined with other syntaxes. Limit one wildcard per search.</li>
+                        <li><code>( ~cat ~tiger ~leopard ) ( ~dog ~wolf )</code> — Search for posts that are tagged with one (or more) of cat, tiger or leopard, and one (or more) of dog or wolf.</li>
                     </ul>
                 </section>
                 <section><h4>Sorting</h4>
                     <ul>
-                        <li><code>order:score</code> — Sort by score (desc)</li>
-                        <li><code>order:score_asc</code> — Sort by score (asc)</li>
-                        <li><code>order:favcount</code> — Sort by favorites</li>
-                        <li><code>order:id</code> — Sort by ID (newest first)</li>
-                        <li><code>order:random</code> — Random order</li>
+                        <li><code>order:id</code> — Oldest to newest</li>
+                        <li><code>order:id_desc</code> — Newest to oldest</li>
+                        <li><code>order:score</code> — Highest score first</li>
+                        <li><code>order:score_asc</code> — Lowest score first</li>
+                        <li><code>order:favcount</code> — Most favorites first</li>
+                        <li><code>order:favcount_asc</code> — Least favorites first</li>
+                        <li><code>order:comment_count</code> — Most comments first</li>
+                        <li><code>order:comment_count_asc</code> — Least comments first</li>
+                        <li><code>order:mpixels</code> — Largest resolution first</li>
+                        <li><code>order:mpixels_asc</code> — Smallest resolution first</li>
+                        <li><code>order:filesize</code> — Largest file size first</li>
+                        <li><code>order:filesize_asc</code> — Smallest file size first</li>
+                        <li><code>order:landscape</code> — Wide and short to tall and thin</li>
+                        <li><code>order:portrait</code> — Tall and thin to wide and short</li>
+                        <li><code>order:duration</code> — Video duration longest to shortest</li>
+                        <li><code>order:duration_asc</code> — Video duration shortest to longest</li>
+                        <li><code>order:random</code> — Orders posts randomly</li>
                     </ul>
                 </section>
-                <section><h4>Date Ranges</h4>
+                <section><h4>User Metatags</h4>
                     <ul>
+                        <li><code>user:Bob</code> — Posts uploaded by Bob</li>
+                        <li><code>fav:Bob</code> or <code>favoritedby:Bob</code> — Posts favorited by Bob</li>
+                        <li><code>voted:anything</code> — Posts you voted on. Only works while logged in.</li>
+                        <li><code>votedup:anything</code> or <code>upvote:anything</code> — Posts you upvoted. Only works while logged in.</li>
+                        <li><code>voteddown:anything</code> or <code>downvote:anything</code> — Posts you downvoted. Only works while logged in.</li>
+                        <li><code>approver:Bob</code> — Posts approved by Bob</li>
+                        <li><code>commenter:Bob</code> or <code>comm:Bob</code> — Posts commented on by Bob</li>
+                        <li><code>noter:Bob</code> — Posts with notes written by Bob</li>
+                    </ul>
+                </section>
+                <section><h4>Post Metatags - Counts</h4>
+                    <ul>
+                        <li><code>id:100</code> — Post with an ID of 100</li>
+                        <li><code>score:100</code> — Posts with a score of 100</li>
+                        <li><code>favcount:100</code> — Posts with exactly 100 favorites</li>
+                        <li><code>comment_count:100</code> — Posts with exactly 100 comments</li>
+                        <li><code>tagcount:2</code> — Posts with exactly 2 tags</li>
+                        <li><code>gentags:2</code> — Posts with exactly 2 general tags</li>
+                        <li><code>arttags:2</code> — Posts with exactly 2 artist tags</li>
+                        <li><code>chartags:2</code> — Posts with exactly 2 character tags</li>
+                        <li><code>copytags:2</code> — Posts with exactly 2 copyright tags</li>
+                        <li><code>spectags:2</code> — Posts with exactly 2 species tags</li>
+                        <li><code>invtags:2</code> — Posts with exactly 2 invalid tags</li>
+                        <li><code>lortags:2</code> — Posts with exactly 2 lore tags</li>
+                        <li><code>metatags:2</code> — Posts with exactly 2 meta tags</li>
+                    </ul>
+                </section>
+                <section><h4>Rating</h4>
+                    <ul>
+                        <li><code>rating:safe</code> or <code>rating:s</code> — Posts rated safe</li>
+                        <li><code>rating:questionable</code> or <code>rating:q</code> — Posts rated questionable</li>
+                        <li><code>rating:explicit</code> or <code>rating:e</code> — Posts rated explicit</li>
+                    </ul>
+                </section>
+                <section><h4>File Types</h4>
+                    <ul>
+                        <li><code>type:jpg</code> — Posts that are JPG, a type of image</li>
+                        <li><code>type:png</code> — Posts that are PNG, a type of image</li>
+                        <li><code>type:gif</code> — Posts that are GIF, a type of image (may be animated)</li>
+                        <li><code>type:swf</code> — Posts that are Flash, a format used for animation</li>
+                        <li><code>type:webm</code> — Posts that are WebM, a type of video</li>
+                    </ul>
+                </section>
+                <section><h4>Image Size</h4>
+                    <ul>
+                        <li><code>width:100</code> — Posts with a width of 100 pixels</li>
+                        <li><code>height:100</code> — Posts with a height of 100 pixels</li>
+                        <li><code>mpixels:1</code> — Posts that are 1 megapixel (a 1000x1000 image equals 1 megapixel)</li>
+                        <li><code>ratio:1.33</code> — Search for posts with a ratio of 4:3. All ratios are rounded to two digits, therefore 1.33 will return posts with a ratio of 4:3.</li>
+                        <li><code>filesize:200KB</code> — Posts with a file size of 200 kilobytes. File sizes within ±5% of the value are included.</li>
+                        <li><code>filesize:2MB</code> — Posts with a file size of 2 megabytes. File sizes within ±5% of the value are included.</li>
+                    </ul>
+                </section>
+                <section><h4>Post Status</h4>
+                    <ul>
+                        <li><code>status:pending</code> — Posts that are waiting to be approved or deleted</li>
+                        <li><code>status:active</code> — Posts that have been approved</li>
+                        <li><code>status:deleted</code> — Posts that have been deleted</li>
+                        <li><code>status:flagged</code> — Posts that are flagged for deletion</li>
+                        <li><code>status:modqueue</code> — Posts that are pending or flagged</li>
+                        <li><code>status:any</code> — All active or deleted posts</li>
+                    </ul>
+                </section>
+                <section><h4>Dates</h4>
+                    <ul>
+                        <li><code>date:2012-04-27</code> or <code>date:april/27/2012</code> — Search for posts uploaded on a specific date</li>
                         <li><code>date:today</code> — Posts from today</li>
-                        <li><code>date:week</code> — Posts from last 7 days</li>
-                        <li><code>date:month</code> — Posts from last 30 days</li>
-                        <li><code>date:2023-01-01</code> — Posts from specific date</li>
-                        <li><code>date:2023-01-01..2023-12-31</code> — Date range</li>
+                        <li><code>date:yesterday</code> — Posts from yesterday</li>
+                        <li><code>date:week</code> — Posts from the last 7 days</li>
+                        <li><code>date:month</code> — Posts from the last 30 days</li>
+                        <li><code>date:year</code> — Posts from the last 365 days</li>
+                        <li><code>date:5_days_ago</code> — Posts from within the last 5 days</li>
+                        <li><code>date:5_weeks_ago</code> — Posts from within the last 5 weeks</li>
+                        <li><code>date:5_months_ago</code> — Posts from within the last 5 months</li>
+                        <li><code>date:5_years_ago</code> — Posts from within the last 5 years</li>
+                        <li><code>date:yesterweek</code> — Posts from last week</li>
+                        <li><code>date:yestermonth</code> — Posts from last month</li>
+                        <li><code>date:yesteryear</code> — Posts from last year</li>
+                    </ul>
+                </section>
+                <section><h4>Text Searching</h4>
+                    <ul>
+                        <li><code>source:*example.com</code> — Posts with a source that contains "example.com", prefix matched, use wildcards as needed</li>
+                        <li><code>source:none</code> — Posts without a source</li>
+                        <li><code>description:whatever</code> — Posts with a description that contains the text "whatever"</li>
+                        <li><code>description:"hello there"</code> — Posts with a description that contains the text "hello there"</li>
+                        <li><code>note:whatever</code> — Posts with a note that contains the text "whatever"</li>
+                        <li><code>delreason:*whatever</code> — Deleted posts that contain a reason with the text "whatever", prefix matched, use wildcards as needed</li>
+                    </ul>
+                </section>
+                <section><h4>Parents and Children</h4>
+                    <ul>
+                        <li><code>ischild:true</code> — Posts that are a child</li>
+                        <li><code>ischild:false</code> — Posts that aren't a child</li>
+                        <li><code>isparent:true</code> — Posts that are a parent</li>
+                        <li><code>isparent:false</code> — Posts that aren't a parent</li>
+                        <li><code>parent:1234</code> — Posts with a parent of 1234</li>
+                        <li><code>parent:none</code> — Posts with no parent (same as ischild:false)</li>
+                    </ul>
+                </section>
+                <section><h4>Other</h4>
+                    <ul>
+                        <li><code>hassource:true</code> — Posts with a source</li>
+                        <li><code>hassource:false</code> — Posts without a source</li>
+                        <li><code>hasdescription:true</code> — Posts with a description</li>
+                        <li><code>hasdescription:false</code> — Posts without a description</li>
+                        <li><code>inpool:true</code> — Posts that are in a pool</li>
+                        <li><code>inpool:false</code> — Posts that aren't in a pool</li>
+                        <li><code>pool:4</code> or <code>pool:fox_and_the_grapes</code> — Posts in the pool "Fox and the Grapes"</li>
+                        <li><code>set:17</code> or <code>set:cute_rabbits</code> — Posts in the set with the short name "cute_rabbits"</li>
+                        <li><code>md5:02dd0...</code> — Post with the given MD5 hash. MD5 hashes will never be shared by more than one image.</li>
+                        <li><code>duration:>120</code> — Videos with a duration of at least 120 seconds</li>
+                    </ul>
+                </section>
+                <section><h4>Range Syntax</h4>
+                    <ul>
+                        <li><code>id:100</code> — Post with an ID of exactly 100</li>
+                        <li><code>date:year..month</code> — Posts uploaded between 30 days ago and 1 year ago</li>
+                        <li><code>filesize:200KB..300KB</code> — Posts with a file size between 200 kilobytes and 300 kilobytes</li>
+                        <li><code>score:25..50</code> — Posts with a score between 25 and 50</li>
+                        <li><code>score:>=100</code> — Posts with a score of 100 or greater (100+)</li>
+                        <li><code>score:>100</code> — Posts with a score greater than 100 (101+)</li>
+                        <li><code>favcount:<=100</code> — Posts with 100 or less favorites (0-100)</li>
+                        <li><code>favcount:<100</code> — Posts with less than 100 favorites (0-99)</li>
                     </ul>
                 </section>
             `
@@ -451,12 +568,24 @@
         let foundSort = false;
         let ratingsSet = new Set();
         uniqueTags.forEach(tag => {
-            // sort:<type>:<order>
-            const sortMatch = tag.match(/^sort:([a-z_]+):(asc|desc)$/);
-            if (sortMatch) {
-                sortType = sortMatch[1];
-                sortOrder = sortMatch[2];
-                foundSort = true;
+            // Handle both e621 and rule34 sort formats
+            let sortMatch;
+            if (isE621) {
+                // e621 format: order:score or order:score_asc
+                sortMatch = tag.match(/^order:([a-z_]+)(_asc)?$/);
+                if (sortMatch) {
+                    sortType = sortMatch[1];
+                    sortOrder = sortMatch[2] ? 'asc' : 'desc';
+                    foundSort = true;
+                }
+            } else {
+                // rule34 format: sort:score:desc or sort:score:asc
+                sortMatch = tag.match(/^sort:([a-z_]+):(asc|desc)$/);
+                if (sortMatch) {
+                    sortType = sortMatch[1];
+                    sortOrder = sortMatch[2];
+                    foundSort = true;
+                }
             }
             // rating:<value>
             const ratingMatch = tag.match(/^rating:(safe|questionable|explicit)$/);
@@ -511,7 +640,8 @@
                     removeBtn.onclick = () => {
                         // --- Bi-directional sync: update UI controls when metatag pill is removed ---
                         // If removing a sort or rating metatag, update UI controls
-                        if (/^sort:[a-z_]+:(asc|desc)$/.test(tag)) {
+                        const isSortTag = isE621 ? /^order:[a-z_]+(_asc)?$/.test(tag) : /^sort:[a-z_]+:(asc|desc)$/.test(tag);
+                        if (isSortTag) {
                             if (typeof sortSelect !== 'undefined') {
                                 sortSelect.value = '';
                                 orderSwitch.style.display = 'none';
@@ -744,14 +874,184 @@
         modalObj.modal.focus();
     }
 
-    // --- Cheat Sheet Modal ---
-    function showCheatSheetModal() {
-        // Structured documentation-style cheat sheet
-        const docWrap = document.createElement('div');
-        docWrap.className = 'modal-doc';
+    // --- Dynamic Cheat Sheet Cache ---
+    const CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+    
+    async function fetchCheatSheet(url) {
+        try {
+            const response = await fetch(url, {
+                credentials: 'same-origin',
+                headers: {
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const html = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            
+            // Extract cheat sheet content based on site
+            let content = '';
+            if (isE621) {
+                // e621 specific extraction
+                const cheatsheetSection = doc.querySelector('#c-help #a-show .styled-dtext');
+                if (cheatsheetSection) {
+                    // Clean up the content and convert to our format
+                    content = extractE621CheatSheet(cheatsheetSection);
+                }
+            } else if (isRule34) {
+                // rule34 specific extraction
+                const cheatsheetSection = doc.querySelector('.content');
+                if (cheatsheetSection) {
+                    content = extractRule34CheatSheet(cheatsheetSection);
+                }
+            }
+            
+            return content;
+        } catch (error) {
+            console.error('Failed to fetch cheat sheet:', error);
+            return null;
+        }
+    }
+    
+    function extractE621CheatSheet(element) {
+        // Convert e621's cheat sheet format to our modal format
+        let html = '<div class="dynamic-cheatsheet">';
         
-        // Use site-specific content or fallback to generic content
-        const cheatSheetContent = siteConfig.cheatSheetContent || `
+        // Process each section
+        const sections = element.querySelectorAll('h4, h1, p, ul, table');
+        let currentSection = '';
+        
+        sections.forEach(el => {
+            if (el.tagName === 'H4' || el.tagName === 'H1') {
+                if (currentSection) html += '</ul></section>';
+                html += `<section><h4>${el.textContent}</h4><ul>`;
+                currentSection = el.textContent;
+            } else if (el.tagName === 'P' && el.textContent.includes('—')) {
+                // Handle definition-style paragraphs
+                const [code, desc] = el.textContent.split('—').map(s => s.trim());
+                if (code && desc) {
+                    html += `<li><code>${code}</code> — ${desc}</li>`;
+                }
+            } else if (el.tagName === 'UL') {
+                // Copy list items
+                el.querySelectorAll('li').forEach(li => {
+                    html += `<li>${li.innerHTML}</li>`;
+                });
+            } else if (el.tagName === 'TABLE') {
+                // Convert tables to list format
+                el.querySelectorAll('tbody tr').forEach(row => {
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length >= 2) {
+                        const code = cells[0].textContent.trim();
+                        const desc = cells[1].textContent.trim();
+                        html += `<li><code>${code}</code> — ${desc}</li>`;
+                    }
+                });
+            }
+        });
+        
+        if (currentSection) html += '</ul></section>';
+        html += '</div>';
+        
+        return html;
+    }
+    
+    function extractRule34CheatSheet(element) {
+        // Convert rule34's cheat sheet format to our modal format
+        // Similar to e621 but adjusted for rule34's HTML structure
+        return element.innerHTML; // Simplified for now
+    }
+    
+    async function getCachedCheatSheet(site) {
+        const cacheKey = `booru-cheatsheet-${site}`;
+        const cached = localStorage.getItem(cacheKey);
+        
+        if (cached) {
+            try {
+                const data = JSON.parse(cached);
+                const now = new Date().getTime();
+                
+                // Check if cache is still valid
+                if (data.timestamp && (now - data.timestamp) < CACHE_DURATION) {
+                    return data.content;
+                }
+            } catch (e) {
+                console.error('Failed to parse cached cheat sheet:', e);
+            }
+        }
+        
+        // Fetch fresh data
+        let url = '';
+        if (site === 'e621') {
+            url = 'https://e621.net/help/cheatsheet';
+        } else if (site === 'rule34') {
+            url = 'https://rule34.xxx/index.php?page=help&topic=cheatsheet';
+        }
+        
+        if (url) {
+            const content = await fetchCheatSheet(url);
+            if (content) {
+                // Cache the result
+                const cacheData = {
+                    content: content,
+                    timestamp: new Date().getTime(),
+                    url: url
+                };
+                try {
+                    localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+                } catch (e) {
+                    console.error('Failed to cache cheat sheet:', e);
+                }
+                return content;
+            }
+        }
+        
+        // Fallback to static content
+        return null;
+    }
+    
+    function clearCheatSheetCache() {
+        const sites = ['e621', 'rule34'];
+        sites.forEach(site => {
+            localStorage.removeItem(`booru-cheatsheet-${site}`);
+        });
+    }
+    
+    // --- Cheat Sheet Modal ---
+    async function showCheatSheetModal() {
+        // Show loading state
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'modal-doc';
+        loadingDiv.innerHTML = '<p style="text-align: center;">Loading cheat sheet...</p>';
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = 'Close';
+        closeBtn.type = 'button';
+        
+        let modalObj = createModal('modal-cheat', 'Cheat Sheet', loadingDiv, [closeBtn]);
+        closeBtn.onclick = modalObj.closeModal;
+        modalObj.modal.style.display = 'flex';
+        modalObj.modal.focus();
+        
+        // Determine which site we're on
+        let site = '';
+        if (isE621) site = 'e621';
+        else if (isRule34) site = 'rule34';
+        
+        // Try to get dynamic content
+        let cheatSheetContent = null;
+        if (site) {
+            cheatSheetContent = await getCachedCheatSheet(site);
+        }
+        
+        // If dynamic fetch failed, use static content
+        if (!cheatSheetContent) {
+            cheatSheetContent = siteConfig.cheatSheetContent || `
           <section><h4>Basic Search</h4>
             <ul>
               <li><code>tag1 tag2</code> — Posts with <b>tag1</b> and <b>tag2</b></li>
@@ -787,16 +1087,71 @@
             </ul>
           </section>
         `;
+        }
         
+        // Update modal content
+        const docWrap = document.createElement('div');
+        docWrap.className = 'modal-doc';
         docWrap.innerHTML = cheatSheetContent;
         
-        const closeBtn = document.createElement('button');
-        closeBtn.textContent = 'Close';
-        closeBtn.type = 'button';
-        let modalObj = createModal('modal-cheat', 'Cheat Sheet', docWrap, [closeBtn]);
-        closeBtn.onclick = modalObj.closeModal;
-        modalObj.modal.style.display = 'flex';
-        modalObj.modal.focus();
+        // Add reference link and cache info
+        const infoBar = document.createElement('div');
+        infoBar.className = 'cheatsheet-info-bar';
+        infoBar.style.cssText = 'margin-top: 16px; padding: 12px; background: #f0f4fa; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;';
+        
+        const refLink = document.createElement('a');
+        refLink.href = site === 'e621' ? 'https://e621.net/help/cheatsheet' : 
+                       site === 'rule34' ? 'https://rule34.xxx/index.php?page=help&topic=cheatsheet' : '#';
+        refLink.target = '_blank';
+        refLink.textContent = 'View on site →';
+        refLink.style.cssText = 'color: #4a90e2; text-decoration: none; font-weight: 500;';
+        refLink.onmouseover = () => { refLink.style.textDecoration = 'underline'; };
+        refLink.onmouseout = () => { refLink.style.textDecoration = 'none'; };
+        
+        const cacheInfo = document.createElement('span');
+        cacheInfo.style.cssText = 'font-size: 0.9em; color: #666;';
+        
+        // Check cache status
+        const cacheKey = `booru-cheatsheet-${site}`;
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+            try {
+                const data = JSON.parse(cached);
+                const age = new Date().getTime() - data.timestamp;
+                const days = Math.floor(age / (24 * 60 * 60 * 1000));
+                const hours = Math.floor((age % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+                cacheInfo.textContent = `Cached: ${days}d ${hours}h ago`;
+            } catch (e) {
+                cacheInfo.textContent = 'Using static content';
+            }
+        } else {
+            cacheInfo.textContent = 'Using static content';
+        }
+        
+        const flushBtn = document.createElement('button');
+        flushBtn.textContent = 'Refresh Cache';
+        flushBtn.type = 'button';
+        flushBtn.style.cssText = 'border-radius: 12px; padding: 6px 16px; font-size: 0.9em; border: 1.5px solid #b0d0b0; background: #f8fff8; cursor: pointer; transition: all 0.2s;';
+        flushBtn.onmouseover = () => { flushBtn.style.borderColor = '#4a90e2'; flushBtn.style.background = '#e0f7fa'; };
+        flushBtn.onmouseout = () => { flushBtn.style.borderColor = '#b0d0b0'; flushBtn.style.background = '#f8fff8'; };
+        flushBtn.onclick = async () => {
+            clearCheatSheetCache();
+            modalObj.closeModal();
+            await showCheatSheetModal(); // Reload the modal
+        };
+        
+        infoBar.appendChild(refLink);
+        infoBar.appendChild(cacheInfo);
+        infoBar.appendChild(flushBtn);
+        
+        docWrap.appendChild(infoBar);
+        
+        // Update modal with new content
+        const modalContent = modalObj.modal.querySelector('.modal-content');
+        const oldDoc = modalContent.querySelector('.modal-doc');
+        if (oldDoc) {
+            oldDoc.replaceWith(docWrap);
+        }
     }
 
     // --- Search Bar Creation ---
@@ -1099,7 +1454,17 @@
                 // Sort + Order (single metatag)
                 if (sortSelect.value) {
                     let order = orderSwitch.dataset.state || 'desc';
-                    metatags.push(`sort:${sortSelect.value}:${order}`);
+                    if (site === 'e621') {
+                        // e621 format: order:score or order:score_asc
+                        if (order === 'asc') {
+                            metatags.push(`order:${sortSelect.value}_asc`);
+                        } else {
+                            metatags.push(`order:${sortSelect.value}`);
+                        }
+                    } else {
+                        // rule34 format: sort:score:desc or sort:score:asc
+                        metatags.push(`sort:${sortSelect.value}:${order}`);
+                    }
                 }
                 // Ratings (OR logic)
                 const checkedRatings = Array.from(sortRow.querySelectorAll('.r34-rating-checkbox:checked')).map(cb => cb.value);
@@ -1109,7 +1474,7 @@
                     metatags.push('( ' + checkedRatings.map(r => `rating:${r}`).join(' ~ ') + ' )');
                 }
                 // Remove any existing metatags of these types from tags
-                const metatagPrefixes = ['sort:', 'rating:', '( rating:'];
+                const metatagPrefixes = site === 'e621' ? ['order:', 'rating:', '( rating:'] : ['sort:', 'rating:', '( rating:'];
                 tags = tags.filter(tag => !metatagPrefixes.some(prefix => tag.startsWith(prefix)));
                 // Add new metatags
                 tags = [...tags, ...metatags];
@@ -1135,9 +1500,13 @@
 
         // --- Sync metatags with UI changes ---
         function syncMetatagsFromUI() {
-            // Remove all sort: and rating: metatags (including parenthesized OR metatags and single rating: ones)
+            // Remove all sort:/order: and rating: metatags (including parenthesized OR metatags and single rating: ones)
             tags = tags.filter(tag => {
-                if (tag.startsWith('sort:')) return false;
+                if (site === 'e621') {
+                    if (tag.startsWith('order:')) return false;
+                } else {
+                    if (tag.startsWith('sort:')) return false;
+                }
                 if (/^rating:(safe|questionable|explicit)$/.test(tag)) return false;
                 if (/^\(\s*rating:(safe|questionable|explicit)(\s*~\s*rating:(safe|questionable|explicit))*\s*\)$/.test(tag)) return false;
                 return true;
@@ -1145,7 +1514,17 @@
             // Add sort metatag if selected
             if (sortSelect.value) {
                 let order = orderSwitch.dataset.state || 'desc';
-                tags.push(`sort:${sortSelect.value}:${order}`);
+                if (site === 'e621') {
+                    // e621 format: order:score or order:score_asc
+                    if (order === 'asc') {
+                        tags.push(`order:${sortSelect.value}_asc`);
+                    } else {
+                        tags.push(`order:${sortSelect.value}`);
+                    }
+                } else {
+                    // rule34 format: sort:score:desc or sort:score:asc
+                    tags.push(`sort:${sortSelect.value}:${order}`);
+                }
             }
             // Add rating metatag(s) with OR logic
             const checkedRatings = Array.from(sortRow.querySelectorAll('.r34-rating-checkbox:checked')).map(cb => cb.value);

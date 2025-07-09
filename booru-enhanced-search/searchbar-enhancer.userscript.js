@@ -183,12 +183,60 @@ sort:updated:desc
         // Always get from window to avoid ReferenceError
         const metatagList = window.r34_metatagList;
         const metatagRowWrap = window.r34_metatagRowWrap;
+        const includeList = window.r34_includeList;
+        const excludeList = window.r34_excludeList;
         // Defensive: ensure tags are unique before rendering
         const uniqueTags = Array.from(new Set(tags));
+        // Declare metatagRegex only once
+        const metatagRegex = /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/;
+        // --- Render include/exclude rows ---
+        if (includeList) includeList.innerHTML = '';
+        if (excludeList) excludeList.innerHTML = '';
+        uniqueTags.forEach((tag, idx) => {
+            if (metatagRegex.test(tag)) return; // skip metatags
+            if (tag.startsWith('-')) {
+                // Exclude tag
+                if (excludeList) {
+                    const tagEl = document.createElement('span');
+                    tagEl.className = 'r34-tag-item r34-exclude-item';
+                    tagEl.textContent = tag;
+                    const removeBtn = document.createElement('span');
+                    removeBtn.className = 'r34-remove-tag';
+                    removeBtn.textContent = '×';
+                    removeBtn.onclick = () => {
+                        const tagIdx = tags.indexOf(tag);
+                        if (tagIdx !== -1) {
+                            tags.splice(tagIdx, 1);
+                            renderTags(tagList);
+                        }
+                    };
+                    tagEl.appendChild(removeBtn);
+                    excludeList.appendChild(tagEl);
+                }
+            } else {
+                // Include tag
+                if (includeList) {
+                    const tagEl = document.createElement('span');
+                    tagEl.className = 'r34-tag-item r34-include-item';
+                    tagEl.textContent = tag;
+                    const removeBtn = document.createElement('span');
+                    removeBtn.className = 'r34-remove-tag';
+                    removeBtn.textContent = '×';
+                    removeBtn.onclick = () => {
+                        const tagIdx = tags.indexOf(tag);
+                        if (tagIdx !== -1) {
+                            tags.splice(tagIdx, 1);
+                            renderTags(tagList);
+                        }
+                    };
+                    tagEl.appendChild(removeBtn);
+                    includeList.appendChild(tagEl);
+                }
+            }
+        });
+        // --- Render metatag row ---
         if (metatagList && metatagRowWrap) {
             metatagList.innerHTML = '';
-            // Only show metatag row if there are metatags
-            const metatagRegex = /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/;
             const metatags = uniqueTags.filter(tag => metatagRegex.test(tag));
             if (metatags.length > 0) {
                 metatagRowWrap.style.display = '';
@@ -220,7 +268,6 @@ sort:updated:desc
         let sortOrder = 'desc';
         let foundSort = false;
         let ratingsSet = new Set();
-        const metatagRegex = /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/;
         uniqueTags.forEach(tag => {
             // sort:<type>:<order>
             const sortMatch = tag.match(/^sort:([a-z_]+):(asc|desc)$/);
@@ -611,6 +658,56 @@ sort:updated:desc
         const tagList = document.createElement('div');
         tagList.className = 'r34-tag-list';
 
+        // --- Include/Exclude Tag Rows ---
+        // Include row
+        const includeRowWrap = document.createElement('div');
+        includeRowWrap.className = 'r34-include-row-wrap';
+        const includeRowHeader = document.createElement('div');
+        includeRowHeader.className = 'r34-include-row-header';
+        const includeRowTitle = document.createElement('span');
+        includeRowTitle.textContent = 'Include Tags';
+        const includeToggle = document.createElement('button');
+        includeToggle.type = 'button';
+        includeToggle.className = 'r34-include-toggle';
+        includeToggle.textContent = 'See less';
+        includeRowHeader.appendChild(includeRowTitle);
+        includeRowHeader.appendChild(includeToggle);
+        const includeList = document.createElement('div');
+        includeList.className = 'r34-include-list';
+        includeRowWrap.appendChild(includeRowHeader);
+        includeRowWrap.appendChild(includeList);
+        let includeExpanded = true;
+        includeList.style.display = '';
+        includeToggle.onclick = function() {
+            includeExpanded = !includeExpanded;
+            includeList.style.display = includeExpanded ? '' : 'none';
+            includeToggle.textContent = includeExpanded ? 'See less' : 'See more';
+        };
+        // Exclude row
+        const excludeRowWrap = document.createElement('div');
+        excludeRowWrap.className = 'r34-exclude-row-wrap';
+        const excludeRowHeader = document.createElement('div');
+        excludeRowHeader.className = 'r34-exclude-row-header';
+        const excludeRowTitle = document.createElement('span');
+        excludeRowTitle.textContent = 'Exclude Tags';
+        const excludeToggle = document.createElement('button');
+        excludeToggle.type = 'button';
+        excludeToggle.className = 'r34-exclude-toggle';
+        excludeToggle.textContent = 'See less';
+        excludeRowHeader.appendChild(excludeRowTitle);
+        excludeRowHeader.appendChild(excludeToggle);
+        const excludeList = document.createElement('div');
+        excludeList.className = 'r34-exclude-list';
+        excludeRowWrap.appendChild(excludeRowHeader);
+        excludeRowWrap.appendChild(excludeList);
+        let excludeExpanded = true;
+        excludeList.style.display = '';
+        excludeToggle.onclick = function() {
+            excludeExpanded = !excludeExpanded;
+            excludeList.style.display = excludeExpanded ? '' : 'none';
+            excludeToggle.textContent = excludeExpanded ? 'See less' : 'See more';
+        };
+
         // --- Metatag Row ---
         const metatagRowWrap = document.createElement('div');
         metatagRowWrap.className = 'r34-metatag-row-wrap';
@@ -772,6 +869,8 @@ sort:updated:desc
         searchForm.appendChild(sortRow);
         centerWrap.appendChild(searchForm);
         centerWrap.appendChild(tagList);
+        centerWrap.appendChild(includeRowWrap);
+        centerWrap.appendChild(excludeRowWrap);
         centerWrap.appendChild(metatagRowWrap);
 
         // --- Bind Events ---
@@ -781,9 +880,11 @@ sort:updated:desc
 
         // Make tagList, metatagList and metatagRowWrap globally accessible for addTag/renderTags
         window.r34_tagList = tagList;
+        window.r34_includeList = includeList;
+        window.r34_excludeList = excludeList;
         window.r34_metatagList = metatagList;
         window.r34_metatagRowWrap = metatagRowWrap;
-        return { centerWrap, searchForm, searchInput, searchButton, tagList, metatagList, metatagRowWrap };
+        return { centerWrap, searchForm, searchInput, searchButton, tagList, includeList, excludeList, metatagList, metatagRowWrap };
     }
 
     // --- Site-Specific Setup ---
@@ -1360,6 +1461,66 @@ sort:updated:desc
                 gap: 4px;
             }
             .r34-metatag-list {
+                gap: 6px;
+            }
+        }
+        /* Include/Exclude Tag Rows */
+        .r34-include-row-wrap, .r34-exclude-row-wrap {
+            width: 100%;
+            margin: 10px 0 0 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .r34-include-row-header, .r34-exclude-row-header {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.08em;
+            font-weight: 600;
+            color: #00549e;
+            margin-bottom: 2px;
+        }
+        .r34-include-toggle, .r34-exclude-toggle {
+            border-radius: 10px;
+            padding: 4px 16px;
+            font-size: 1em;
+            border: 2px solid #b0d0b0;
+            background: #f8fff8;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            font-weight: 500;
+            color: #00549e;
+        }
+        .r34-include-toggle:focus, .r34-exclude-toggle:focus {
+            border-color: #4a90e2;
+            outline: none;
+        }
+        .r34-include-list, .r34-exclude-list {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 10px;
+            width: 100%;
+            margin-top: 2px;
+            justify-content: center;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .r34-include-item, .r34-exclude-item {
+            background: #e6f7ff;
+            border: 1.5px solid #7ecfff;
+            color: #00549e;
+        }
+        @media (max-width: 700px) {
+            .r34-include-row-header, .r34-exclude-row-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+            }
+            .r34-include-list, .r34-exclude-list {
                 gap: 6px;
             }
         }

@@ -39,6 +39,36 @@
     const isE621 = location.hostname.endsWith('e621.net');
     const isRule34 = location.hostname.endsWith('rule34.xxx');
 
+    // --- Settings State ---
+    let settings = {
+        showIncludeExclude: true,
+        showMetatags: true,
+        showAllTags: true
+    };
+
+    // Load settings from localStorage
+    function loadSettings() {
+        const saved = localStorage.getItem('booru-enhancer-settings');
+        if (saved) {
+            try {
+                settings = { ...settings, ...JSON.parse(saved) };
+            } catch (e) {
+                console.warn('Failed to load settings:', e);
+            }
+        }
+    }
+
+    // Save settings to localStorage
+    function saveSettings() {
+        try {
+            localStorage.setItem('booru-enhancer-settings', JSON.stringify(settings));
+        } catch (e) {
+            console.warn('Failed to save settings:', e);
+        }
+    }
+
+    loadSettings();
+
     // --- Cheat Sheet Content ---
     const CHEAT_SHEET = `
 tag1 tag2
@@ -96,17 +126,17 @@ sort:updated:desc
         if (hexcolor.startsWith('rgb')) {
             const rgb = hexcolor.match(/\d+/g).map(Number);
             if (rgb.length >= 3) {
-                hexcolor = rgb.slice(0,3).map(x => x.toString(16).padStart(2, '0')).join('');
+                hexcolor = rgb.slice(0, 3).map(x => x.toString(16).padStart(2, '0')).join('');
             }
         }
         if (hexcolor.length === 3) {
             hexcolor = hexcolor.split('').map(x => x + x).join('');
         }
         if (hexcolor.length !== 6) return '#222';
-        var r = parseInt(hexcolor.substr(0,2),16);
-        var g = parseInt(hexcolor.substr(2,2),16);
-        var b = parseInt(hexcolor.substr(4,2),16);
-        var yiq = ((r*299)+(g*587)+(b*114))/1000;
+        var r = parseInt(hexcolor.substr(0, 2), 16);
+        var g = parseInt(hexcolor.substr(2, 2), 16);
+        var b = parseInt(hexcolor.substr(4, 2), 16);
+        var yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
         return (yiq >= 128) ? '#222' : '#fff';
     }
 
@@ -185,18 +215,27 @@ sort:updated:desc
         const metatagRowWrap = window.r34_metatagRowWrap;
         const includeList = window.r34_includeList;
         const excludeList = window.r34_excludeList;
+        const includeRowWrap = window.r34_includeRowWrap;
+        const excludeRowWrap = window.r34_excludeRowWrap;
+
         // Defensive: ensure tags are unique before rendering
         const uniqueTags = Array.from(new Set(tags));
         // Declare metatagRegex only once
         const metatagRegex = /^(sort:|rating:|user:|parent:|score:|md5:|width:|height:|source:|\( rating:)/;
+
         // --- Render include/exclude rows ---
         if (includeList) includeList.innerHTML = '';
         if (excludeList) excludeList.innerHTML = '';
+
+        let hasIncludeTags = false;
+        let hasExcludeTags = false;
+
         uniqueTags.forEach((tag, idx) => {
             if (metatagRegex.test(tag)) return; // skip metatags
             if (tag.startsWith('-')) {
+                hasExcludeTags = true;
                 // Exclude tag
-                if (excludeList) {
+                if (excludeList && settings.showIncludeExclude) {
                     const tagEl = document.createElement('span');
                     tagEl.className = 'r34-tag-item r34-exclude-item';
                     tagEl.textContent = tag;
@@ -214,8 +253,9 @@ sort:updated:desc
                     excludeList.appendChild(tagEl);
                 }
             } else {
+                hasIncludeTags = true;
                 // Include tag
-                if (includeList) {
+                if (includeList && settings.showIncludeExclude) {
                     const tagEl = document.createElement('span');
                     tagEl.className = 'r34-tag-item r34-include-item';
                     tagEl.textContent = tag;
@@ -234,11 +274,19 @@ sort:updated:desc
                 }
             }
         });
+
+        // Show/hide include/exclude rows based on content and settings
+        if (includeRowWrap) {
+            includeRowWrap.style.display = hasIncludeTags ? '' : 'none';
+        }
+        if (excludeRowWrap) {
+            excludeRowWrap.style.display = hasExcludeTags ? '' : 'none';
+        }
         // --- Render metatag row ---
         if (metatagList && metatagRowWrap) {
             metatagList.innerHTML = '';
             const metatags = uniqueTags.filter(tag => metatagRegex.test(tag));
-            if (metatags.length > 0) {
+            if (metatags.length > 0 && settings.showMetatags) {
                 metatagRowWrap.style.display = '';
                 metatags.forEach((tag, idx) => {
                     const tagEl = document.createElement('span');
@@ -311,40 +359,50 @@ sort:updated:desc
             });
         }
         // --- Render only non-metatag tag pills in the main tag list ---
-        tagList.innerHTML = '';
-        uniqueTags.forEach((tag, idx) => {
-            if (metatagRegex.test(tag)) return; // skip metatags in main tag list
-            const tagEl = document.createElement('span');
-            tagEl.className = 'r34-tag-item';
-            tagEl.textContent = tag;
-            const removeBtn = document.createElement('span');
-            removeBtn.className = 'r34-remove-tag';
-            removeBtn.textContent = '×';
-            removeBtn.onclick = () => {
-                // --- Bi-directional sync: update UI controls when metatag pill is removed ---
-                // If removing a sort or rating metatag, update UI controls
-                if (/^sort:[a-z_]+:(asc|desc)$/.test(tag)) {
-                    if (typeof sortSelect !== 'undefined') {
-                        sortSelect.value = '';
-                        orderSwitch.style.display = 'none';
-                    }
-                }
-                if (/^rating:(safe|questionable|explicit)$/.test(tag)) {
-                    if (typeof sortRow !== 'undefined') {
-                        sortRow.querySelectorAll('.r34-rating-checkbox').forEach(cb => {
-                            if (cb.value === tag.split(':')[1]) cb.checked = false;
-                        });
-                    }
-                }
-                const tagIdx = tags.indexOf(tag);
-                if (tagIdx !== -1) {
-                    tags.splice(tagIdx, 1);
-                renderTags(tagList);
-                }
-            };
-            tagEl.appendChild(removeBtn);
-            tagList.appendChild(tagEl);
-        });
+        const allTagsRowWrap = window.r34_allTagsRowWrap;
+        const allTagsList = window.r34_allTagsList;
+        
+        if (allTagsList && allTagsRowWrap) {
+            allTagsList.innerHTML = '';
+            const mainTags = uniqueTags.filter(tag => !metatagRegex.test(tag));
+            if (mainTags.length > 0 && settings.showAllTags) {
+                allTagsRowWrap.style.display = '';
+                mainTags.forEach((tag, idx) => {
+                    const tagEl = document.createElement('span');
+                    tagEl.className = 'r34-tag-item';
+                    tagEl.textContent = tag;
+                    const removeBtn = document.createElement('span');
+                    removeBtn.className = 'r34-remove-tag';
+                    removeBtn.textContent = '×';
+                    removeBtn.onclick = () => {
+                        // --- Bi-directional sync: update UI controls when metatag pill is removed ---
+                        // If removing a sort or rating metatag, update UI controls
+                        if (/^sort:[a-z_]+:(asc|desc)$/.test(tag)) {
+                            if (typeof sortSelect !== 'undefined') {
+                                sortSelect.value = '';
+                                orderSwitch.style.display = 'none';
+                            }
+                        }
+                        if (/^rating:(safe|questionable|explicit)$/.test(tag)) {
+                            if (typeof sortRow !== 'undefined') {
+                                sortRow.querySelectorAll('.r34-rating-checkbox').forEach(cb => {
+                                    if (cb.value === tag.split(':')[1]) cb.checked = false;
+                                });
+                            }
+                        }
+                        const tagIdx = tags.indexOf(tag);
+                        if (tagIdx !== -1) {
+                            tags.splice(tagIdx, 1);
+                            renderTags(tagList);
+                        }
+                    };
+                    tagEl.appendChild(removeBtn);
+                    allTagsList.appendChild(tagEl);
+                });
+            } else {
+                allTagsRowWrap.style.display = 'none';
+            }
+        }
         updateTagColors();
     }
 
@@ -422,7 +480,7 @@ sort:updated:desc
         const copyBtn = document.createElement('button');
         copyBtn.textContent = 'Copy';
         copyBtn.type = 'button';
-        copyBtn.onclick = function() {
+        copyBtn.onclick = function () {
             textarea.select();
             document.execCommand('copy');
         };
@@ -431,8 +489,8 @@ sort:updated:desc
         exportBtn.textContent = 'Export to file';
         exportBtn.type = 'button';
         exportBtn.style.display = 'none';
-        exportBtn.onclick = function() {
-            const blob = new Blob([jsonExport], {type: 'application/json'});
+        exportBtn.onclick = function () {
+            const blob = new Blob([jsonExport], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -480,6 +538,76 @@ sort:updated:desc
         modalObj.modal.focus();
         // Default to raw view
         showRaw();
+    }
+
+    // --- Settings Modal ---
+    function showSettingsModal() {
+        const formWrap = document.createElement('div');
+        formWrap.className = 'modal-form settings-form';
+
+        // Include/Exclude toggle
+        const includeExcludeRow = document.createElement('div');
+        includeExcludeRow.className = 'settings-row';
+        const includeExcludeLabel = document.createElement('label');
+        includeExcludeLabel.className = 'settings-label';
+        const includeExcludeCheckbox = document.createElement('input');
+        includeExcludeCheckbox.type = 'checkbox';
+        includeExcludeCheckbox.checked = settings.showIncludeExclude;
+        includeExcludeLabel.appendChild(includeExcludeCheckbox);
+        includeExcludeLabel.appendChild(document.createTextNode(' Show Include/Exclude Tags'));
+        includeExcludeRow.appendChild(includeExcludeLabel);
+
+        // Metatags toggle
+        const metatagsRow = document.createElement('div');
+        metatagsRow.className = 'settings-row';
+        const metatagsLabel = document.createElement('label');
+        metatagsLabel.className = 'settings-label';
+        const metatagsCheckbox = document.createElement('input');
+        metatagsCheckbox.type = 'checkbox';
+        metatagsCheckbox.checked = settings.showMetatags;
+        metatagsLabel.appendChild(metatagsCheckbox);
+        metatagsLabel.appendChild(document.createTextNode(' Show Metatags'));
+        metatagsRow.appendChild(metatagsLabel);
+
+        // All Tags toggle
+        const allTagsRow = document.createElement('div');
+        allTagsRow.className = 'settings-row';
+        const allTagsLabel = document.createElement('label');
+        allTagsLabel.className = 'settings-label';
+        const allTagsCheckbox = document.createElement('input');
+        allTagsCheckbox.type = 'checkbox';
+        allTagsCheckbox.checked = settings.showAllTags;
+        allTagsLabel.appendChild(allTagsCheckbox);
+        allTagsLabel.appendChild(document.createTextNode(' Show All Tags'));
+        allTagsRow.appendChild(allTagsLabel);
+
+        formWrap.appendChild(includeExcludeRow);
+        formWrap.appendChild(metatagsRow);
+        formWrap.appendChild(allTagsRow);
+
+        // Action buttons
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Save';
+        saveBtn.type = 'button';
+        saveBtn.onclick = function () {
+            settings.showIncludeExclude = includeExcludeCheckbox.checked;
+            settings.showMetatags = metatagsCheckbox.checked;
+            settings.showAllTags = allTagsCheckbox.checked;
+            saveSettings();
+            renderTags(window.r34_tagList);
+            modalObj.closeModal();
+        };
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.type = 'button';
+
+        const actions = [saveBtn, cancelBtn];
+
+        let modalObj = createModal('modal-settings', 'Settings', formWrap, actions);
+        cancelBtn.onclick = modalObj.closeModal;
+        modalObj.modal.style.display = 'flex';
+        modalObj.modal.focus();
     }
 
     // --- Cheat Sheet Modal ---
@@ -576,6 +704,13 @@ sort:updated:desc
         cheatBtn.title = 'Show cheat sheet';
         cheatBtn.onclick = showCheatSheetModal;
 
+        const settingsBtn = document.createElement('button');
+        settingsBtn.type = 'button';
+        settingsBtn.textContent = '⚙';
+        settingsBtn.className = 'r34-settings-btn';
+        settingsBtn.title = 'Settings';
+        settingsBtn.onclick = showSettingsModal;
+
         const searchButton = document.createElement('button');
         searchButton.type = 'submit';
         searchButton.textContent = 'Search';
@@ -617,7 +752,7 @@ sort:updated:desc
         orderSwitch.dataset.state = 'desc'; // default to desc
         orderSwitch.textContent = 'Order: Descend \u2193';
         orderSwitch.style.display = 'none'; // hidden by default
-        orderSwitch.onclick = function() {
+        orderSwitch.onclick = function () {
             // Cycle through: desc -> asc -> desc
             const state = orderSwitch.dataset.state;
             if (state === 'desc') {
@@ -630,7 +765,7 @@ sort:updated:desc
         };
         sortRow.appendChild(orderSwitch);
         // Show/hide order switch based on sort selection
-        sortSelect.addEventListener('change', function() {
+        sortSelect.addEventListener('change', function () {
             if (sortSelect.value) {
                 orderSwitch.style.display = '';
             } else {
@@ -678,7 +813,7 @@ sort:updated:desc
         includeRowWrap.appendChild(includeList);
         let includeExpanded = true;
         includeList.style.display = '';
-        includeToggle.onclick = function() {
+        includeToggle.onclick = function () {
             includeExpanded = !includeExpanded;
             includeList.style.display = includeExpanded ? '' : 'none';
             includeToggle.textContent = includeExpanded ? 'See less' : 'See more';
@@ -702,7 +837,7 @@ sort:updated:desc
         excludeRowWrap.appendChild(excludeList);
         let excludeExpanded = true;
         excludeList.style.display = '';
-        excludeToggle.onclick = function() {
+        excludeToggle.onclick = function () {
             excludeExpanded = !excludeExpanded;
             excludeList.style.display = excludeExpanded ? '' : 'none';
             excludeToggle.textContent = excludeExpanded ? 'See less' : 'See more';
@@ -727,10 +862,35 @@ sort:updated:desc
         metatagRowWrap.appendChild(metatagList);
         let metatagExpanded = false;
         metatagList.style.display = 'none';
-        metatagToggle.onclick = function() {
+        metatagToggle.onclick = function () {
             metatagExpanded = !metatagExpanded;
             metatagList.style.display = metatagExpanded ? '' : 'none';
             metatagToggle.textContent = metatagExpanded ? 'See less' : 'See more';
+        };
+
+        // --- All Tags Row ---
+        const allTagsRowWrap = document.createElement('div');
+        allTagsRowWrap.className = 'r34-all-tags-row-wrap';
+        const allTagsRowHeader = document.createElement('div');
+        allTagsRowHeader.className = 'r34-all-tags-row-header';
+        const allTagsRowTitle = document.createElement('span');
+        allTagsRowTitle.textContent = 'All Tags';
+        const allTagsToggle = document.createElement('button');
+        allTagsToggle.type = 'button';
+        allTagsToggle.className = 'r34-all-tags-toggle';
+        allTagsToggle.textContent = 'See less';
+        allTagsRowHeader.appendChild(allTagsRowTitle);
+        allTagsRowHeader.appendChild(allTagsToggle);
+        const allTagsList = document.createElement('div');
+        allTagsList.className = 'r34-all-tags-list';
+        allTagsRowWrap.appendChild(allTagsRowHeader);
+        allTagsRowWrap.appendChild(allTagsList);
+        let allTagsExpanded = true;
+        allTagsList.style.display = '';
+        allTagsToggle.onclick = function () {
+            allTagsExpanded = !allTagsExpanded;
+            allTagsList.style.display = allTagsExpanded ? '' : 'none';
+            allTagsToggle.textContent = allTagsExpanded ? 'See less' : 'See more';
         };
 
         // Track if user is navigating autocomplete with arrow keys
@@ -738,95 +898,95 @@ sort:updated:desc
 
         // --- Event Bindings ---
         function bindInputEvents() {
-        searchInput.addEventListener('keydown', function(e) {
-            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                autocompleteNavigating = true;
-            }
-        });
-        searchInput.addEventListener('input', function(e) {
-            autocompleteNavigating = false;
-            let value = searchInput.value;
-            // Only split on comma or space if not inside parentheses
-            const endsWithSeparator = /[ ,]$/.test(value);
-            // Count open/close parentheses
-            const openParens = (value.match(/\(/g) || []).length;
-            const closeParens = (value.match(/\)/g) || []).length;
-            const balanced = openParens === closeParens;
-            if (endsWithSeparator && balanced) {
-                value = value.replace(/[ ,]+$/, '').trim();
-                addTag(value);
-                searchInput.value = '';
-            }
-        });
-        // Only submit form on Enter if input is empty and there are tags
-        searchInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                if (autocompleteNavigating) {
-                    // Let autocomplete handle Enter
-                    return;
+            searchInput.addEventListener('keydown', function (e) {
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    autocompleteNavigating = true;
                 }
-                // If input is empty and there are tags, submit
-                if (searchInput.value.trim() === '' && tags.length > 0) {
-                    e.preventDefault();
-                    searchInput.value = tags.join(' ');
-                    searchForm.submit();
-                } else if (searchInput.value.trim() !== '') {
-                    // No suggestion selected, add raw input as tag
-                    e.preventDefault();
-                    const value = searchInput.value.trim();
+            });
+            searchInput.addEventListener('input', function (e) {
+                autocompleteNavigating = false;
+                let value = searchInput.value;
+                // Only split on comma or space if not inside parentheses
+                const endsWithSeparator = /[ ,]$/.test(value);
+                // Count open/close parentheses
+                const openParens = (value.match(/\(/g) || []).length;
+                const closeParens = (value.match(/\)/g) || []).length;
+                const balanced = openParens === closeParens;
+                if (endsWithSeparator && balanced) {
+                    value = value.replace(/[ ,]+$/, '').trim();
                     addTag(value);
                     searchInput.value = '';
-                    autocompleteNavigating = false;
-                    // Close/hide autocomplete dropdown
-                    if (site === 'rule34' && searchInput.awesomplete) {
-                        searchInput.awesomplete.close();
+                }
+            });
+            // Only submit form on Enter if input is empty and there are tags
+            searchInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    if (autocompleteNavigating) {
+                        // Let autocomplete handle Enter
+                        return;
                     }
-                    if (site === 'e621') {
-                        const ul = document.querySelector('ul[role="listbox"]');
-                        if (ul) ul.setAttribute('hidden', '');
+                    // If input is empty and there are tags, submit
+                    if (searchInput.value.trim() === '' && tags.length > 0) {
+                        e.preventDefault();
+                        searchInput.value = tags.join(' ');
+                        searchForm.submit();
+                    } else if (searchInput.value.trim() !== '') {
+                        // No suggestion selected, add raw input as tag
+                        e.preventDefault();
+                        const value = searchInput.value.trim();
+                        addTag(value);
+                        searchInput.value = '';
+                        autocompleteNavigating = false;
+                        // Close/hide autocomplete dropdown
+                        if (site === 'rule34' && searchInput.awesomplete) {
+                            searchInput.awesomplete.close();
+                        }
+                        if (site === 'e621') {
+                            const ul = document.querySelector('ul[role="listbox"]');
+                            if (ul) ul.setAttribute('hidden', '');
+                        }
                     }
                 }
-            }
-        });
+            });
         }
 
         function bindFormEvents() {
-        searchForm.addEventListener('submit', function(e) {
-            // --- Inject metatags from UI controls ---
-            let metatags = [];
-            // Sort + Order (single metatag)
-            if (sortSelect.value) {
-                let order = orderSwitch.dataset.state || 'desc';
-                metatags.push(`sort:${sortSelect.value}:${order}`);
-            }
-            // Ratings (OR logic)
-            const checkedRatings = Array.from(sortRow.querySelectorAll('.r34-rating-checkbox:checked')).map(cb => cb.value);
-            if (checkedRatings.length === 1) {
-                metatags.push(`rating:${checkedRatings[0]}`);
-            } else if (checkedRatings.length > 1) {
-                metatags.push('( ' + checkedRatings.map(r => `rating:${r}`).join(' ~ ') + ' )');
-            }
-            // Remove any existing metatags of these types from tags
-            const metatagPrefixes = ['sort:', 'rating:','( rating:'];
-            tags = tags.filter(tag => !metatagPrefixes.some(prefix => tag.startsWith(prefix)));
-            // Add new metatags
-            tags = [...tags, ...metatags];
-            // Update input value for submission
-            if (tags.length > 0) {
-                searchInput.value = tags.join(' ');
-            }
-        });
+            searchForm.addEventListener('submit', function (e) {
+                // --- Inject metatags from UI controls ---
+                let metatags = [];
+                // Sort + Order (single metatag)
+                if (sortSelect.value) {
+                    let order = orderSwitch.dataset.state || 'desc';
+                    metatags.push(`sort:${sortSelect.value}:${order}`);
+                }
+                // Ratings (OR logic)
+                const checkedRatings = Array.from(sortRow.querySelectorAll('.r34-rating-checkbox:checked')).map(cb => cb.value);
+                if (checkedRatings.length === 1) {
+                    metatags.push(`rating:${checkedRatings[0]}`);
+                } else if (checkedRatings.length > 1) {
+                    metatags.push('( ' + checkedRatings.map(r => `rating:${r}`).join(' ~ ') + ' )');
+                }
+                // Remove any existing metatags of these types from tags
+                const metatagPrefixes = ['sort:', 'rating:', '( rating:'];
+                tags = tags.filter(tag => !metatagPrefixes.some(prefix => tag.startsWith(prefix)));
+                // Add new metatags
+                tags = [...tags, ...metatags];
+                // Update input value for submission
+                if (tags.length > 0) {
+                    searchInput.value = tags.join(' ');
+                }
+            });
         }
 
         // --- Awesomplete integration for rule34 ---
         function bindAwesompleteEvents() {
-        if (site === 'rule34') {
-            searchInput.addEventListener('awesomplete-selectcomplete', function(e) {
-                const value = searchInput.value.trim();
-                addTag(value);
-                searchInput.value = '';
-            });
-        }
+            if (site === 'rule34') {
+                searchInput.addEventListener('awesomplete-selectcomplete', function (e) {
+                    const value = searchInput.value.trim();
+                    addTag(value);
+                    searchInput.value = '';
+                });
+            }
         }
 
         // --- Sync metatags with UI changes ---
@@ -863,15 +1023,16 @@ sort:updated:desc
         searchBarContainer.appendChild(exportBtn);
         searchBarContainer.appendChild(searchInput);
         searchBarContainer.appendChild(cheatBtn);
+        searchBarContainer.appendChild(settingsBtn);
         searchBarContainer.appendChild(searchButton);
         searchForm.appendChild(searchBarContainer);
         // Insert the new row below the search bar, above the tag list
         searchForm.appendChild(sortRow);
         centerWrap.appendChild(searchForm);
-        centerWrap.appendChild(tagList);
         centerWrap.appendChild(includeRowWrap);
         centerWrap.appendChild(excludeRowWrap);
         centerWrap.appendChild(metatagRowWrap);
+        centerWrap.appendChild(allTagsRowWrap);
 
         // --- Bind Events ---
         bindInputEvents();
@@ -882,9 +1043,13 @@ sort:updated:desc
         window.r34_tagList = tagList;
         window.r34_includeList = includeList;
         window.r34_excludeList = excludeList;
+        window.r34_includeRowWrap = includeRowWrap;
+        window.r34_excludeRowWrap = excludeRowWrap;
         window.r34_metatagList = metatagList;
         window.r34_metatagRowWrap = metatagRowWrap;
-        return { centerWrap, searchForm, searchInput, searchButton, tagList, includeList, excludeList, metatagList, metatagRowWrap };
+        window.r34_allTagsList = allTagsList;
+        window.r34_allTagsRowWrap = allTagsRowWrap;
+        return { centerWrap, searchForm, searchInput, searchButton, tagList, includeList, excludeList, metatagList, metatagRowWrap, allTagsList, allTagsRowWrap };
     }
 
     // --- Site-Specific Setup ---
@@ -934,7 +1099,7 @@ sort:updated:desc
         tags = getTagsFromURL();
         renderTags(tagList);
         searchField.value = '';
-        searchField.addEventListener('keydown', function(e) {
+        searchField.addEventListener('keydown', function (e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 const value = searchField.value.trim();
                 if (value) {
@@ -951,7 +1116,7 @@ sort:updated:desc
                 }
             }
         });
-        originalForm.addEventListener('submit', function(e) {
+        originalForm.addEventListener('submit', function (e) {
             if (tags.length > 0) {
                 searchField.value = tags.join(' ');
             }
@@ -967,8 +1132,8 @@ sort:updated:desc
 
     // --- Style Injection ---
     function injectStyles() {
-    const style = document.createElement('style');
-    style.textContent = `
+        const style = document.createElement('style');
+        style.textContent = `
         .r34-center-wrap {
             display: flex;
             flex-direction: column;
@@ -991,7 +1156,7 @@ sort:updated:desc
             margin-bottom: 10px;
             justify-content: center;
         }
-                .r34-export-btn, .r34-cheat-btn {
+                .r34-export-btn, .r34-cheat-btn, .r34-settings-btn {
                     border-radius: 18px;
                     padding: 8px 18px;
                     font-size: 1.1em;
@@ -1002,7 +1167,7 @@ sort:updated:desc
                     white-space: nowrap;
                     flex-shrink: 0;
                 }
-                .r34-export-btn:hover, .r34-cheat-btn:hover {
+                .r34-export-btn:hover, .r34-cheat-btn:hover, .r34-settings-btn:hover {
                     border-color: #4a90e2;
                     background: #e0f7fa;
         }
@@ -1523,6 +1688,85 @@ sort:updated:desc
             .r34-include-list, .r34-exclude-list {
                 gap: 6px;
             }
+            .r34-all-tags-row-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 4px;
+            }
+            .r34-all-tags-list {
+                gap: 6px;
+            }
+        }
+        /* All Tags Row */
+        .r34-all-tags-row-wrap {
+            width: 100%;
+            margin: 10px 0 0 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .r34-all-tags-row-header {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.08em;
+            font-weight: 600;
+            color: #00549e;
+            margin-bottom: 2px;
+        }
+        .r34-all-tags-toggle {
+            border-radius: 10px;
+            padding: 4px 16px;
+            font-size: 1em;
+            border: 2px solid #b0d0b0;
+            background: #f8fff8;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            font-weight: 500;
+            color: #00549e;
+        }
+        .r34-all-tags-toggle:focus {
+            border-color: #4a90e2;
+            outline: none;
+        }
+        .r34-all-tags-list {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 10px;
+            width: 100%;
+            margin-top: 2px;
+            justify-content: center;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        /* Settings Form */
+        .settings-form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            padding: 8px 0;
+        }
+        .settings-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .settings-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.08em;
+            font-weight: 500;
+            color: #333;
+            cursor: pointer;
+        }
+        .settings-label input[type="checkbox"] {
+            accent-color: #4a90e2;
+            width: 1.2em;
+            height: 1.2em;
         }
     `;
     document.head.appendChild(style);
@@ -1530,28 +1774,28 @@ sort:updated:desc
 
     // --- e621 Autocomplete hijack: expose jQuery UI Autocomplete instance ---
     function hijackE621Autocomplete() {
-    if (location.hostname.endsWith('e621.net')) {
-        function exposeE621Autocomplete() {
-            var searchInput = document.querySelector('[data-autocomplete="tag-query"], [data-autocomplete="tag-edit"], [data-autocomplete="tag"]');
-            if (!searchInput) return;
-            var $input = window.jQuery && window.jQuery(searchInput);
-            if ($input && $input.autocomplete) {
-                var instance = $input.autocomplete("instance");
-                if (instance) {
-                    searchInput.e621Autocomplete = instance;
+        if (location.hostname.endsWith('e621.net')) {
+            function exposeE621Autocomplete() {
+                var searchInput = document.querySelector('[data-autocomplete="tag-query"], [data-autocomplete="tag-edit"], [data-autocomplete="tag"]');
+                if (!searchInput) return;
+                var $input = window.jQuery && window.jQuery(searchInput);
+                if ($input && $input.autocomplete) {
+                    var instance = $input.autocomplete("instance");
+                    if (instance) {
+                        searchInput.e621Autocomplete = instance;
+                    }
                 }
             }
-        }
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function () {
+                    exposeE621Autocomplete();
+                    setTimeout(exposeE621Autocomplete, 1000);
+                });
+            } else {
                 exposeE621Autocomplete();
                 setTimeout(exposeE621Autocomplete, 1000);
-            });
-        } else {
-            exposeE621Autocomplete();
-            setTimeout(exposeE621Autocomplete, 1000);
+            }
         }
-    }
     }
 
     // --- Main Entrypoint ---
@@ -1570,4 +1814,4 @@ sort:updated:desc
     // --- Run ---
     init();
 
-})(); 
+})();  

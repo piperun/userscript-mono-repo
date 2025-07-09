@@ -361,7 +361,7 @@ sort:updated:desc
         // --- Render only non-metatag tag pills in the main tag list ---
         const allTagsRowWrap = window.r34_allTagsRowWrap;
         const allTagsList = window.r34_allTagsList;
-        
+
         if (allTagsList && allTagsRowWrap) {
             allTagsList.innerHTML = '';
             const mainTags = uniqueTags.filter(tag => !metatagRegex.test(tag));
@@ -678,6 +678,7 @@ sort:updated:desc
             searchInput = document.createElement('textarea');
             searchInput.rows = 1;
             searchInput.id = 'tags';
+            searchInput.name = 'tags';
             searchInput.setAttribute('data-autocomplete', 'tag-query');
             searchInput.placeholder = 'Enter tags...';
             searchInput.className = 'r34-search-input';
@@ -952,6 +953,8 @@ sort:updated:desc
 
         function bindFormEvents() {
             searchForm.addEventListener('submit', function (e) {
+                // Prevent default form submission
+                e.preventDefault();
                 // --- Inject metatags from UI controls ---
                 let metatags = [];
                 // Sort + Order (single metatag)
@@ -975,6 +978,8 @@ sort:updated:desc
                 if (tags.length > 0) {
                     searchInput.value = tags.join(' ');
                 }
+                // Actually submit the form with tags
+                searchForm.submit();
             });
         }
 
@@ -1769,7 +1774,7 @@ sort:updated:desc
             height: 1.2em;
         }
     `;
-    document.head.appendChild(style);
+        document.head.appendChild(style);
     }
 
     // --- e621 Autocomplete hijack: expose jQuery UI Autocomplete instance ---

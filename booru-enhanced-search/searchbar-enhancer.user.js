@@ -34,7 +34,7 @@
 (function main() {
     'use strict';
 
-// --- Configuration ---
+    // --- Configuration ---
     const SITE_CONFIG = {
         "e621.net": {
             placeholder: "Enter tags...",
@@ -270,6 +270,32 @@
                 </section>
             `
         },
+        "danbooru.donmai.us": {
+            placeholder: "Enter tags...",
+            sortOptions: [
+                { value: 'score', label: 'Score' },
+                { value: 'favcount', label: 'Favorites' },
+                { value: 'comment_count', label: 'Comments' },
+                { value: 'id', label: 'ID' },
+                { value: 'mpixels', label: 'Megapixels' },
+                { value: 'filesize', label: 'File Size' },
+                { value: 'landscape', label: 'Landscape' },
+                { value: 'portrait', label: 'Portrait' },
+                { value: 'created_at', label: 'Created' },
+                { value: 'updated_at', label: 'Updated' },
+                { value: 'tagcount', label: 'Tag Count' },
+                { value: 'duration', label: 'Duration' },
+                { value: 'random', label: 'Random' }
+            ],
+            ratings: [
+                { value: 'general', label: 'General' },
+                { value: 'sensitive', label: 'Sensitive' },
+                { value: 'questionable', label: 'Questionable' },
+                { value: 'explicit', label: 'Explicit' }
+            ],
+            metatagRegex: /^(order:|rating:|user:|parent:|score:|md5:|width:|height:|source:|id:|favcount:|comment_count:|type:|date:|status:|pool:|set:|\( rating:)/,
+            cheatSheetUrl: "https://danbooru.donmai.us/wiki_pages/help%3Acheatsheet"
+        },
         "default": {
             placeholder: "Enter tags...",
             sortOptions: [
@@ -325,6 +351,14 @@
     const siteConfig = SITE_CONFIG[location.hostname] || SITE_CONFIG['default'];
     const isE621 = location.hostname.endsWith('e621.net');
     const isRule34 = location.hostname.endsWith('rule34.xxx');
+    const isDanbooru = location.hostname.endsWith('danbooru.donmai.us');
+    const isWikiPage = location.pathname.includes('/wiki') || location.pathname.includes('/help') || document.title.includes('Wiki');
+
+    // Define global site variable
+    let site = '';
+    if (isE621) site = 'e621';
+    else if (isRule34) site = 'rule34';
+    else if (isDanbooru) site = 'danbooru';
 
     // --- Settings State ---
     let settings = {
@@ -360,7 +394,7 @@
     function addSiteConfig(hostname, config) {
         SITE_CONFIG[hostname] = config;
     }
-    
+
     // Example usage to add a new site:
     // addSiteConfig('newsite.com', {
     //     placeholder: "Search tags...",
@@ -400,6 +434,9 @@
         } else if (isRule34) {
             bg = '#e6ffe6';
             border = '#7edc7e';
+        } else if (isDanbooru) {
+            bg = '#ffe6e6';
+            border = '#ff7e7e';
         } else {
             bg = '#e0ffe0';
             border = '#b0d0b0';
@@ -424,6 +461,8 @@
     function getTagsFromURL() {
         const params = new URLSearchParams(window.location.search);
         let tagString = params.get('tags') || '';
+
+
         // Replace + with space
         tagString = tagString.replace(/\+/g, ' ');
         // Custom split: treat parenthesized groups and tags with parentheses as single tags
@@ -457,6 +496,29 @@
             }
         }
         if (buffer.trim()) tags.push(buffer.trim());
+
+
+
+        // Convert old sort syntax to new unified syntax for e621/danbooru
+        if (isDanbooru || isE621) {
+            const convertedTags = tags.map(tag => {
+                // Convert sort:updated_at:desc to order:updated_at
+                if (tag.startsWith('sort:') && tag.includes(':')) {
+                    const parts = tag.split(':');
+                    if (parts.length === 3) {
+                        const [, field, direction] = parts;
+                        const converted = direction === 'asc' ? `order:${field}_asc` : `order:${field}`;
+
+                        return converted;
+                    }
+                }
+                return tag;
+            });
+
+            return convertedTags.filter(Boolean);
+        }
+
+
         return tags.filter(Boolean);
     }
 
@@ -568,15 +630,17 @@
         let foundSort = false;
         let ratingsSet = new Set();
         uniqueTags.forEach(tag => {
-            // Handle both e621 and rule34 sort formats
+            // Handle unified order: format for e621/danbooru and sort: format for rule34
             let sortMatch;
-            if (isE621) {
-                // e621 format: order:score or order:score_asc
+
+            if (site === 'e621' || site === 'danbooru') {
+                // Unified e621/danbooru format: order:score or order:score_asc
                 sortMatch = tag.match(/^order:([a-z_]+)(_asc)?$/);
                 if (sortMatch) {
                     sortType = sortMatch[1];
                     sortOrder = sortMatch[2] ? 'asc' : 'desc';
                     foundSort = true;
+
                 }
             } else {
                 // rule34 format: sort:score:desc or sort:score:asc
@@ -585,6 +649,7 @@
                     sortType = sortMatch[1];
                     sortOrder = sortMatch[2];
                     foundSort = true;
+
                 }
             }
             // rating:<value>
@@ -640,7 +705,7 @@
                     removeBtn.onclick = () => {
                         // --- Bi-directional sync: update UI controls when metatag pill is removed ---
                         // If removing a sort or rating metatag, update UI controls
-                        const isSortTag = isE621 ? /^order:[a-z_]+(_asc)?$/.test(tag) : /^sort:[a-z_]+:(asc|desc)$/.test(tag);
+                        const isSortTag = (site === 'e621' || site === 'danbooru') ? /^order:[a-z_]+(_asc)?$/.test(tag) : /^sort:[a-z_]+:(asc|desc)$/.test(tag);
                         if (isSortTag) {
                             if (typeof sortSelect !== 'undefined') {
                                 sortSelect.value = '';
@@ -876,7 +941,7 @@
 
     // --- Dynamic Cheat Sheet Cache ---
     const CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-    
+
     async function fetchCheatSheet(url) {
         try {
             const response = await fetch(url, {
@@ -885,97 +950,289 @@
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
                 }
             });
-            
+
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
-            
+
             const html = await response.text();
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
-            
+
             // Extract cheat sheet content based on site
             let content = '';
             if (isE621) {
-                // e621 specific extraction
                 const cheatsheetSection = doc.querySelector('#c-help #a-show .styled-dtext');
                 if (cheatsheetSection) {
                     // Clean up the content and convert to our format
                     content = extractE621CheatSheet(cheatsheetSection);
                 }
             } else if (isRule34) {
-                // rule34 specific extraction
                 const cheatsheetSection = doc.querySelector('.content');
                 if (cheatsheetSection) {
                     content = extractRule34CheatSheet(cheatsheetSection);
                 }
+            } else if (isDanbooru) {
+                const cheatsheetSection = doc.querySelector('#c-wiki-pages #a-show .prose, .wiki-page-body, .dtext-container');
+                if (cheatsheetSection) {
+                    content = extractDanbooruCheatSheet(cheatsheetSection);
+                }
             }
-            
+
             return content;
         } catch (error) {
             console.error('Failed to fetch cheat sheet:', error);
             return null;
         }
     }
-    
+
     function extractE621CheatSheet(element) {
-        // Convert e621's cheat sheet format to our modal format
-        let html = '<div class="dynamic-cheatsheet">';
-        
-        // Process each section
-        const sections = element.querySelectorAll('h4, h1, p, ul, table');
-        let currentSection = '';
-        
-        sections.forEach(el => {
-            if (el.tagName === 'H4' || el.tagName === 'H1') {
-                if (currentSection) html += '</ul></section>';
-                html += `<section><h4>${el.textContent}</h4><ul>`;
-                currentSection = el.textContent;
-            } else if (el.tagName === 'P' && el.textContent.includes('—')) {
-                // Handle definition-style paragraphs
-                const [code, desc] = el.textContent.split('—').map(s => s.trim());
-                if (code && desc) {
-                    html += `<li><code>${code}</code> — ${desc}</li>`;
-                }
-            } else if (el.tagName === 'UL') {
-                // Copy list items
-                el.querySelectorAll('li').forEach(li => {
-                    html += `<li>${li.innerHTML}</li>`;
-                });
-            } else if (el.tagName === 'TABLE') {
-                // Convert tables to list format
-                el.querySelectorAll('tbody tr').forEach(row => {
-                    const cells = row.querySelectorAll('td');
-                    if (cells.length >= 2) {
-                        const code = cells[0].textContent.trim();
-                        const desc = cells[1].textContent.trim();
-                        html += `<li><code>${code}</code> — ${desc}</li>`;
-                    }
-                });
-            }
-        });
-        
-        if (currentSection) html += '</ul></section>';
-        html += '</div>';
-        
+        // First, convert HTML to structured JSON data
+        const cheatSheetData = parseCheatSheetToJSON(element, 'e621');
+
+        // Then convert JSON to standardized HTML format
+        const html = formatCheatSheetFromJSON(cheatSheetData);
+
         return html;
     }
-    
+
     function extractRule34CheatSheet(element) {
-        // Convert rule34's cheat sheet format to our modal format
-        // Similar to e621 but adjusted for rule34's HTML structure
-        return element.innerHTML; // Simplified for now
+        // First, convert HTML to structured JSON data
+        const cheatSheetData = parseCheatSheetToJSON(element, 'rule34');
+
+        // Then convert JSON to standardized HTML format
+        const html = formatCheatSheetFromJSON(cheatSheetData);
+
+        return html;
     }
-    
+
+    function extractDanbooruCheatSheet(element) {
+        // First, convert HTML to structured JSON data
+        const cheatSheetData = parseCheatSheetToJSON(element, 'danbooru');
+
+        // Then convert JSON to standardized HTML format
+        const html = formatCheatSheetFromJSON(cheatSheetData);
+
+        return html;
+    }
+
+    function parseCheatSheetToJSON(element, site) {
+        // Clone the element to avoid modifying the original
+        const clonedElement = element.cloneNode(true);
+
+        // Remove Table of Contents sections
+        const tocElements = clonedElement.querySelectorAll('h1, h2, h3, h4, h5, h6');
+        tocElements.forEach(heading => {
+            const headingText = heading.textContent.toLowerCase();
+            if (headingText.includes('table of contents') || headingText.includes('contents')) {
+                let nextElement = heading.nextElementSibling;
+                heading.remove();
+                while (nextElement && !/^H[1-6]$/.test(nextElement.tagName)) {
+                    const toRemove = nextElement;
+                    nextElement = nextElement.nextElementSibling;
+                    toRemove.remove();
+                }
+            }
+        });
+
+        // Remove TOC lists
+        const tocLists = clonedElement.querySelectorAll('ul, ol');
+        tocLists.forEach(list => {
+            const listText = list.textContent.toLowerCase();
+            const hasMultipleSections = (listText.match(/\d+\./g) || []).length > 3;
+            const hasTocKeywords = listText.includes('searching') && listText.includes('metatags');
+            if (hasMultipleSections && hasTocKeywords) {
+                list.remove();
+            }
+        });
+
+        const cheatSheetData = {
+            site: site,
+            sections: []
+        };
+
+        const sections = clonedElement.querySelectorAll('h1, h2, h3, h4, h5, h6, p, ul, table, div');
+        let currentSection = null;
+        let skipSection = false;
+        let orphanedEntries = []; // For content without clear section headers
+
+        sections.forEach(el => {
+            if (/^H[1-6]$/.test(el.tagName)) {
+                const headingText = el.textContent.trim();
+                if (headingText.toLowerCase().includes('table of contents') || headingText.toLowerCase().includes('contents')) {
+                    skipSection = true;
+                    return;
+                } else {
+                    skipSection = false;
+                }
+
+                // If we have orphaned entries, create a default section for them
+                if (orphanedEntries.length > 0 && !currentSection) {
+                    currentSection = {
+                        title: 'Search Help',
+                        entries: orphanedEntries
+                    };
+                    cheatSheetData.sections.push(currentSection);
+                    orphanedEntries = [];
+                }
+
+                currentSection = {
+                    title: headingText,
+                    entries: []
+                };
+                cheatSheetData.sections.push(currentSection);
+            } else if (!skipSection) {
+                const entries = [];
+
+                if (el.tagName === 'P') {
+                    const text = el.textContent.trim();
+                    if (text && !text.toLowerCase().includes('table of contents')) {
+                        const entry = parseTextEntry(text);
+                        if (entry) {
+                            entries.push(entry);
+                        }
+                    }
+                } else if (el.tagName === 'UL') {
+                    el.querySelectorAll('li').forEach(li => {
+                        const text = li.textContent.trim();
+                        if (text && text.length > 3 && !text.toLowerCase().includes('table of contents')) {
+                            const entry = parseTextEntry(text);
+                            if (entry) {
+                                entries.push(entry);
+                            }
+                        }
+                    });
+                } else if (el.tagName === 'TABLE') {
+                    el.querySelectorAll('tbody tr, tr').forEach(row => {
+                        const cells = row.querySelectorAll('td, th');
+                        if (cells.length >= 2) {
+                            const code = cells[0].textContent.trim();
+                            const desc = cells[1].textContent.trim();
+                            if (code && desc && !code.includes('Example') && !code.includes('Description')) {
+                                const entry = {
+                                    type: 'definition',
+                                    code: code,
+                                    description: desc
+                                };
+                                entries.push(entry);
+                            }
+                        }
+                    });
+                } else if (el.tagName === 'DIV' && site === 'rule34') {
+                    // Special handling for Rule34's div-based content
+                    const text = el.textContent.trim();
+                    if (text && text.length > 10) {
+                        // Split by line breaks and process each line
+                        const lines = text.split('\n').filter(line => line.trim().length > 3);
+                        lines.forEach(line => {
+                            const entry = parseTextEntry(line.trim());
+                            if (entry) {
+                                entries.push(entry);
+                            }
+                        });
+                    }
+                }
+
+                // Add entries to current section or orphaned list
+                if (currentSection) {
+                    currentSection.entries.push(...entries);
+                } else {
+                    orphanedEntries.push(...entries);
+                }
+            }
+        });
+
+        // Handle any remaining orphaned entries
+        if (orphanedEntries.length > 0) {
+            const defaultSection = {
+                title: 'Search Help',
+                entries: orphanedEntries
+            };
+            cheatSheetData.sections.push(defaultSection);
+        }
+
+        return cheatSheetData;
+    }
+
+    function parseTextEntry(text) {
+        // Try to parse different formats of text entries
+        if (text.includes('—')) {
+            const parts = text.split('—').map(s => s.trim());
+            if (parts.length >= 2 && parts[0] && parts[1]) {
+                return {
+                    type: 'definition',
+                    code: parts[0].replace(/^[•\s]+/, ''),
+                    description: parts.slice(1).join(' — ')
+                };
+            }
+        }
+
+        // Check for colon-separated format (common in metatags)
+        if (text.includes(':') && !text.startsWith('http')) {
+            const colonIndex = text.indexOf(':');
+            const beforeColon = text.substring(0, colonIndex).trim();
+            const afterColon = text.substring(colonIndex + 1).trim();
+
+            // Only treat as code:description if the part before colon looks like a tag/command
+            if (beforeColon.length > 0 && beforeColon.length < 30 && !beforeColon.includes(' ')) {
+                return {
+                    type: 'definition',
+                    code: beforeColon,
+                    description: afterColon || 'No description available'
+                };
+            }
+        }
+
+        // Check for parenthetical descriptions
+        const parenMatch = text.match(/^([^(]+)\s*\(([^)]+)\)/);
+        if (parenMatch) {
+            return {
+                type: 'definition',
+                code: parenMatch[1].trim(),
+                description: parenMatch[2].trim()
+            };
+        }
+
+        // Default to description-only entry
+        return {
+            type: 'description',
+            description: text
+        };
+    }
+
+    function formatCheatSheetFromJSON(cheatSheetData) {
+        let html = '<div class="dynamic-cheatsheet">';
+
+        cheatSheetData.sections.forEach(section => {
+            if (section.entries.length > 0) {
+                html += `<section><h4>${section.title}</h4><ul>`;
+
+                section.entries.forEach(entry => {
+                    if (entry.type === 'definition' && entry.code) {
+                        html += `<li><code>${entry.code}</code> — ${entry.description}</li>`;
+                    } else {
+                        html += `<li>${entry.description}</li>`;
+                    }
+                });
+
+                html += '</ul></section>';
+            }
+        });
+
+        html += '</div>';
+        return html;
+    }
+
     async function getCachedCheatSheet(site) {
         const cacheKey = `booru-cheatsheet-${site}`;
         const cached = localStorage.getItem(cacheKey);
-        
+
         if (cached) {
             try {
                 const data = JSON.parse(cached);
                 const now = new Date().getTime();
-                
+                const age = now - data.timestamp;
+
                 // Check if cache is still valid
                 if (data.timestamp && (now - data.timestamp) < CACHE_DURATION) {
                     return data.content;
@@ -984,15 +1241,17 @@
                 console.error('Failed to parse cached cheat sheet:', e);
             }
         }
-        
+
         // Fetch fresh data
         let url = '';
         if (site === 'e621') {
             url = 'https://e621.net/help/cheatsheet';
         } else if (site === 'rule34') {
             url = 'https://rule34.xxx/index.php?page=help&topic=cheatsheet';
+        } else if (site === 'danbooru') {
+            url = 'https://danbooru.donmai.us/wiki_pages/help%3Acheatsheet';
         }
-        
+
         if (url) {
             const content = await fetchCheatSheet(url);
             if (content) {
@@ -1010,45 +1269,47 @@
                 return content;
             }
         }
-        
+
         // Fallback to static content
         return null;
     }
-    
+
     function clearCheatSheetCache() {
-        const sites = ['e621', 'rule34'];
+        const sites = ['e621', 'rule34', 'danbooru'];
         sites.forEach(site => {
-            localStorage.removeItem(`booru-cheatsheet-${site}`);
+            const cacheKey = `booru-cheatsheet-${site}`;
+            localStorage.removeItem(cacheKey);
         });
     }
-    
+
     // --- Cheat Sheet Modal ---
     async function showCheatSheetModal() {
         // Show loading state
         const loadingDiv = document.createElement('div');
         loadingDiv.className = 'modal-doc';
         loadingDiv.innerHTML = '<p style="text-align: center;">Loading cheat sheet...</p>';
-        
+
         const closeBtn = document.createElement('button');
         closeBtn.textContent = 'Close';
         closeBtn.type = 'button';
-        
+
         let modalObj = createModal('modal-cheat', 'Cheat Sheet', loadingDiv, [closeBtn]);
         closeBtn.onclick = modalObj.closeModal;
         modalObj.modal.style.display = 'flex';
         modalObj.modal.focus();
-        
+
         // Determine which site we're on
         let site = '';
         if (isE621) site = 'e621';
         else if (isRule34) site = 'rule34';
-        
+        else if (isDanbooru) site = 'danbooru';
+
         // Try to get dynamic content
         let cheatSheetContent = null;
         if (site) {
             cheatSheetContent = await getCachedCheatSheet(site);
         }
-        
+
         // If dynamic fetch failed, use static content
         if (!cheatSheetContent) {
             cheatSheetContent = siteConfig.cheatSheetContent || `
@@ -1088,29 +1349,30 @@
           </section>
         `;
         }
-        
+
         // Update modal content
         const docWrap = document.createElement('div');
         docWrap.className = 'modal-doc';
         docWrap.innerHTML = cheatSheetContent;
-        
+
         // Add reference link and cache info
         const infoBar = document.createElement('div');
         infoBar.className = 'cheatsheet-info-bar';
         infoBar.style.cssText = 'margin-top: 16px; padding: 12px; background: #f0f4fa; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;';
-        
+
         const refLink = document.createElement('a');
-        refLink.href = site === 'e621' ? 'https://e621.net/help/cheatsheet' : 
-                       site === 'rule34' ? 'https://rule34.xxx/index.php?page=help&topic=cheatsheet' : '#';
+        refLink.href = site === 'e621' ? 'https://e621.net/help/cheatsheet' :
+            site === 'rule34' ? 'https://rule34.xxx/index.php?page=help&topic=cheatsheet' :
+                site === 'danbooru' ? 'https://danbooru.donmai.us/wiki_pages/help%3Acheatsheet' : '#';
         refLink.target = '_blank';
         refLink.textContent = 'View on site →';
         refLink.style.cssText = 'color: #4a90e2; text-decoration: none; font-weight: 500;';
         refLink.onmouseover = () => { refLink.style.textDecoration = 'underline'; };
         refLink.onmouseout = () => { refLink.style.textDecoration = 'none'; };
-        
+
         const cacheInfo = document.createElement('span');
         cacheInfo.style.cssText = 'font-size: 0.9em; color: #666;';
-        
+
         // Check cache status
         const cacheKey = `booru-cheatsheet-${site}`;
         const cached = localStorage.getItem(cacheKey);
@@ -1127,7 +1389,7 @@
         } else {
             cacheInfo.textContent = 'Using static content';
         }
-        
+
         const flushBtn = document.createElement('button');
         flushBtn.textContent = 'Refresh Cache';
         flushBtn.type = 'button';
@@ -1139,13 +1401,13 @@
             modalObj.closeModal();
             await showCheatSheetModal(); // Reload the modal
         };
-        
+
         infoBar.appendChild(refLink);
         infoBar.appendChild(cacheInfo);
         infoBar.appendChild(flushBtn);
-        
+
         docWrap.appendChild(infoBar);
-        
+
         // Update modal with new content
         const modalContent = modalObj.modal.querySelector('.modal-content');
         const oldDoc = modalContent.querySelector('.modal-doc');
@@ -1403,14 +1665,36 @@
                 let value = searchInput.value;
                 // Only split on comma or space if not inside parentheses
                 const endsWithSeparator = /[ ,]$/.test(value);
-                // Count open/close parentheses
-                const openParens = (value.match(/\(/g) || []).length;
-                const closeParens = (value.match(/\)/g) || []).length;
-                const balanced = openParens === closeParens;
-                if (endsWithSeparator && balanced) {
-                    value = value.replace(/[ ,]+$/, '').trim();
-                    addTag(value);
-                    searchInput.value = '';
+
+                if (endsWithSeparator) {
+                    // Parse the input to check if we're inside a parenthetical group
+                    // This handles both grouping parentheses like "( rating:safe ~ rating:questionable )"
+                    // and tag name parentheses like "silvia_(artist)"
+                    let parenLevel = 0;
+                    let inGroupParens = false;
+                    let lastChar = '';
+
+                    for (let i = 0; i < value.length - 1; i++) { // -1 to exclude the trailing separator
+                        const char = value[i];
+                        if (char === '(' && (i === 0 || lastChar === ' ')) {
+                            // Opening paren at start or after space - likely a grouping paren
+                            parenLevel++;
+                            inGroupParens = true;
+                        } else if (char === ')' && parenLevel > 0) {
+                            parenLevel--;
+                            if (parenLevel === 0) {
+                                inGroupParens = false;
+                            }
+                        }
+                        if (char !== ' ') lastChar = char;
+                    }
+
+                    // Only split if we're not inside grouping parentheses
+                    if (parenLevel === 0 && !inGroupParens) {
+                        value = value.replace(/[ ,]+$/, '').trim();
+                        addTag(value);
+                        searchInput.value = '';
+                    }
                 }
             });
             // Only submit form on Enter if input is empty and there are tags
@@ -1454,8 +1738,8 @@
                 // Sort + Order (single metatag)
                 if (sortSelect.value) {
                     let order = orderSwitch.dataset.state || 'desc';
-                    if (site === 'e621') {
-                        // e621 format: order:score or order:score_asc
+                    if (site === 'e621' || site === 'danbooru') {
+                        // Unified e621/danbooru format: order:score or order:score_asc
                         if (order === 'asc') {
                             metatags.push(`order:${sortSelect.value}_asc`);
                         } else {
@@ -1474,7 +1758,7 @@
                     metatags.push('( ' + checkedRatings.map(r => `rating:${r}`).join(' ~ ') + ' )');
                 }
                 // Remove any existing metatags of these types from tags
-                const metatagPrefixes = site === 'e621' ? ['order:', 'rating:', '( rating:'] : ['sort:', 'rating:', '( rating:'];
+                const metatagPrefixes = (site === 'e621' || site === 'danbooru') ? ['order:', 'rating:', '( rating:'] : ['sort:', 'rating:', '( rating:'];
                 tags = tags.filter(tag => !metatagPrefixes.some(prefix => tag.startsWith(prefix)));
                 // Add new metatags
                 tags = [...tags, ...metatags];
@@ -1500,30 +1784,30 @@
 
         // --- Sync metatags with UI changes ---
         function syncMetatagsFromUI() {
-            // Remove all sort:/order: and rating: metatags (including parenthesized OR metatags and single rating: ones)
+            // Remove all order: and rating: metatags (including parenthesized OR metatags and single rating: ones)
             tags = tags.filter(tag => {
-                if (site === 'e621') {
-                    if (tag.startsWith('order:')) return false;
-                } else {
-                    if (tag.startsWith('sort:')) return false;
-                }
-                if (/^rating:(safe|questionable|explicit)$/.test(tag)) return false;
-                if (/^\(\s*rating:(safe|questionable|explicit)(\s*~\s*rating:(safe|questionable|explicit))*\s*\)$/.test(tag)) return false;
+                // Use unified order: syntax for both e621 and danbooru
+                if (tag.startsWith('order:')) return false;
+                // Keep legacy sort: removal for rule34
+                if (site === 'rule34' && tag.startsWith('sort:')) return false;
+                if (/^rating:(safe|questionable|explicit|general|sensitive)$/.test(tag)) return false;
+                if (/^\(\s*rating:(safe|questionable|explicit|general|sensitive)(\s*~\s*rating:(safe|questionable|explicit|general|sensitive))*\s*\)$/.test(tag)) return false;
                 return true;
             });
             // Add sort metatag if selected
             if (sortSelect.value) {
                 let order = orderSwitch.dataset.state || 'desc';
-                if (site === 'e621') {
-                    // e621 format: order:score or order:score_asc
-                    if (order === 'asc') {
-                        tags.push(`order:${sortSelect.value}_asc`);
-                    } else {
-                        tags.push(`order:${sortSelect.value}`);
-                    }
+
+                if (site === 'e621' || site === 'danbooru') {
+                    // Unified e621/danbooru format: order:score or order:score_asc
+                    const sortTag = order === 'asc' ? `order:${sortSelect.value}_asc` : `order:${sortSelect.value}`;
+
+                    tags.push(sortTag);
                 } else {
                     // rule34 format: sort:score:desc or sort:score:asc
-                    tags.push(`sort:${sortSelect.value}:${order}`);
+                    const sortTag = `sort:${sortSelect.value}:${order}`;
+
+                    tags.push(sortTag);
                 }
             }
             // Add rating metatag(s) with OR logic
@@ -1579,7 +1863,7 @@
     function setupE621() {
         const originalForm = document.querySelector('form.post-search-form');
         const gallery = document.querySelector('#c-posts');
-        if (!originalForm || !gallery) return;
+        if (!originalForm || !gallery) return false;
         const formAction = originalForm.action;
         const formMethod = originalForm.method;
         const { centerWrap, searchForm, searchInput, searchButton, tagList, metatagList, metatagRowWrap } = createSearchSection('e621');
@@ -1593,12 +1877,13 @@
         // Set up theme observer
         const observer = new MutationObserver(updateTagColors);
         observer.observe(document.body, { attributes: true, attributeFilter: ['data-th-main'] });
+        return true;
     }
 
     function setupRule34() {
         const originalForm = document.querySelector('.sidebar .tag-search form');
         const gallery = document.querySelector('#post-list');
-        if (!originalForm || !gallery) return;
+        if (!originalForm || !gallery) return false;
         const formAction = originalForm.action;
         const formMethod = originalForm.method;
         const { centerWrap, searchForm, searchInput, searchButton, tagList, metatagList, metatagRowWrap } = createSearchSection('rule34');
@@ -1609,13 +1894,130 @@
         tags = getTagsFromURL();
         renderTags(tagList);
         searchInput.value = '';
+        return true;
+    }
+
+    function setupDanbooru() {
+        // Try multiple possible selectors for Danbooru's search form
+        const originalForm = document.querySelector('form[action*="posts"]') ||
+            document.querySelector('form.search-form') ||
+            document.querySelector('#search-form') ||
+            document.querySelector('form:has(input[name="tags"])');
+
+        // Try multiple possible selectors for the posts container
+        const gallery = document.querySelector('#posts') ||
+            document.querySelector('.posts') ||
+            document.querySelector('#post-list') ||
+            document.querySelector('.post-list') ||
+            document.querySelector('#content');
+
+        if (!originalForm || !gallery) {
+            console.log('Danbooru setup failed: originalForm=', originalForm, 'gallery=', gallery);
+            return false;
+        }
+
+        const formAction = originalForm.action || '/posts';
+        const formMethod = originalForm.method || 'GET';
+        const { centerWrap, searchForm, searchInput, searchButton, tagList, metatagList, metatagRowWrap } = createSearchSection('danbooru');
+        searchForm.action = formAction;
+        searchForm.method = formMethod;
+        gallery.parentNode.insertBefore(centerWrap, gallery);
+        originalForm.style.display = 'none';
+        tags = getTagsFromURL();
+        renderTags(tagList);
+        searchInput.value = '';
+        console.log('Danbooru setup completed successfully');
+        return true;
+    }
+
+    function setupWiki() {
+        // For wiki pages, create a simple centered search input
+        const content = document.querySelector('#content') || document.querySelector('main') || document.body;
+        if (!content) return false;
+
+        // Create simple search form
+        const searchWrap = document.createElement('div');
+        searchWrap.className = 'r34-wiki-search-wrap';
+        searchWrap.style.cssText = `
+            display: flex;
+            justify-content: center;
+            margin: 20px auto;
+            max-width: 600px;
+            padding: 0 20px;
+        `;
+
+        const searchForm = document.createElement('form');
+        searchForm.action = '/posts';
+        searchForm.method = 'GET';
+        searchForm.style.cssText = `
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            align-items: center;
+        `;
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.name = 'tags';
+        searchInput.placeholder = 'Search posts...';
+        searchInput.className = 'r34-search-input';
+        searchInput.style.cssText = `
+            flex: 1;
+            border-radius: 18px;
+            padding: 8px 16px;
+            font-size: 1.1em;
+            border: 2px solid #b0d0b0;
+            box-shadow: 0 2px 8px 0 rgba(0,0,0,0.06);
+            transition: border-color 0.2s;
+        `;
+
+        const searchButton = document.createElement('button');
+        searchButton.type = 'submit';
+        searchButton.textContent = 'Search';
+        searchButton.className = 'r34-search-button';
+        searchButton.style.cssText = `
+            border-radius: 18px;
+            padding: 8px 28px;
+            font-size: 1.1em;
+            border: 2px solid #b0d0b0;
+            background: #f8fff8;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            white-space: nowrap;
+        `;
+
+        // Add hover effects
+        searchInput.addEventListener('focus', () => {
+            searchInput.style.borderColor = '#4a90e2';
+        });
+        searchInput.addEventListener('blur', () => {
+            searchInput.style.borderColor = '#b0d0b0';
+        });
+
+        searchButton.addEventListener('mouseenter', () => {
+            searchButton.style.borderColor = '#4a90e2';
+            searchButton.style.background = '#e0f7fa';
+        });
+        searchButton.addEventListener('mouseleave', () => {
+            searchButton.style.borderColor = '#b0d0b0';
+            searchButton.style.background = '#f8fff8';
+        });
+
+        searchForm.appendChild(searchInput);
+        searchForm.appendChild(searchButton);
+        searchWrap.appendChild(searchForm);
+
+        // Insert at the top of content
+        content.insertBefore(searchWrap, content.firstChild);
+
+        return true;
     }
 
     function setupGeneric() {
         const originalForm = findSearchForm();
-        if (!originalForm) return;
+        if (!originalForm) return false;
         const searchField = originalForm.querySelector('input[name="tags"], textarea[name="tags"]');
-        if (!searchField) return;
+        if (!searchField) return false;
         const tagList = document.createElement('div');
         tagList.className = 'r34-tag-list';
         searchField.insertAdjacentElement('afterend', tagList);
@@ -1644,6 +2046,7 @@
                 searchField.value = tags.join(' ');
             }
         });
+        return true;
     }
 
     function findSearchForm() {
@@ -1806,10 +2209,12 @@
                 }
                 .modal-content h3 {
                     margin: 0 0 8px 0;
-                    font-size: 1.25em;
+                    font-size: 1.35em;
                     font-weight: bold;
                     text-align: left;
                     align-self: flex-start;
+                    color: #0066cc;
+                    text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
                 }
                 .modal-actions {
                     display: flex;
@@ -1882,6 +2287,53 @@
                     font-size: 1.08em;
                     color: #4a90e2;
                     font-weight: bold;
+                }
+                .dynamic-cheatsheet section {
+                    margin-bottom: 25px;
+                }
+                .dynamic-cheatsheet h4 {
+                    color: #0066cc;
+                    margin-bottom: 15px;
+                    font-size: 1.15em;
+                    font-weight: bold;
+                    border-bottom: 2px solid #e9ecef;
+                    padding-bottom: 5px;
+                }
+                .dynamic-cheatsheet ul {
+                    list-style: none;
+                    padding: 0;
+                }
+                .dynamic-cheatsheet li {
+                    margin-bottom: 15px;
+                    padding: 12px;
+                    background: #f8f9fa;
+                    border-radius: 8px;
+                    border-left: 4px solid #0066cc;
+                }
+                .dynamic-cheatsheet h5 {
+                    margin: 0 0 8px 0;
+                    color: #d63384;
+                    font-size: 0.95em;
+                    font-weight: bold;
+                    font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
+                    background: #e9ecef;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    display: inline-block;
+                }
+                .dynamic-cheatsheet p {
+                    margin: 0;
+                    color: #333;
+                    line-height: 1.5;
+                    font-size: 0.95em;
+                }
+                .dynamic-cheatsheet code {
+                    background: #e9ecef;
+                    padding: 2px 4px;
+                    border-radius: 3px;
+                    font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
+                    color: #d63384;
+                    font-size: 0.9em;
                 }
                 .modal-doc ul {
                     margin: 0 0 0 18px;
@@ -2322,19 +2774,56 @@
     }
 
     // --- Main Entrypoint ---
+    let initialized = false;
     function init() {
+        if (initialized) {
+            console.log('Searchbar Enhancer: Already initialized, skipping...');
+            return;
+        }
+
+        console.log('Searchbar Enhancer: Initializing...');
+        console.log('Site detection: isE621=', isE621, 'isRule34=', isRule34, 'isDanbooru=', isDanbooru, 'isWikiPage=', isWikiPage);
+        console.log('Current hostname:', location.hostname);
+
         injectStyles();
         hijackE621Autocomplete();
-        if (isE621) {
-            setupE621();
+
+        let setupSuccess = false;
+        if (isWikiPage) {
+            console.log('Setting up Wiki page...');
+            setupSuccess = setupWiki();
+        } else if (isE621) {
+            console.log('Setting up E621...');
+            setupSuccess = setupE621();
         } else if (isRule34) {
-            setupRule34();
+            console.log('Setting up Rule34...');
+            setupSuccess = setupRule34();
+        } else if (isDanbooru) {
+            console.log('Setting up Danbooru...');
+            setupSuccess = setupDanbooru();
         } else {
-            setupGeneric();
+            console.log('Setting up Generic...');
+            setupSuccess = setupGeneric();
+        }
+
+        if (setupSuccess !== false) {
+            initialized = true;
+            console.log('Searchbar Enhancer: Initialization completed');
         }
     }
 
     // --- Run ---
-    init();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
 
-})();  
+    // Also try after a short delay in case of dynamic content
+    setTimeout(() => {
+        if (!initialized) {
+            init();
+        }
+    }, 1000);
+
+})();

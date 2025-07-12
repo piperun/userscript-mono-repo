@@ -469,11 +469,15 @@
         const tags = [];
         let buffer = '';
         let parenLevel = 0;
-        let inTag = false;
         for (let i = 0; i < tagString.length; ++i) {
             const c = tagString[i];
-            if (c === '(' && !inTag) {
-                if (parenLevel === 0 && buffer.trim()) {
+            if (c === '(') {
+                // Check if this looks like a grouping parenthesis (preceded by space or at start)
+                // vs a tag name parenthesis (preceded by underscore or alphanumeric)
+                const prevChar = i > 0 ? tagString[i - 1] : ' ';
+                const isGroupingParen = prevChar === ' ' || i === 0;
+                
+                if (isGroupingParen && parenLevel === 0 && buffer.trim()) {
                     tags.push(buffer.trim());
                     buffer = '';
                 }
@@ -482,7 +486,11 @@
             } else if (c === ')' && parenLevel > 0) {
                 buffer += c;
                 parenLevel--;
-                if (parenLevel === 0) {
+                // Only treat as end of group if this was a grouping parenthesis
+                const nextChar = i < tagString.length - 1 ? tagString[i + 1] : ' ';
+                const isGroupingParen = nextChar === ' ' || i === tagString.length - 1;
+                
+                if (parenLevel === 0 && isGroupingParen) {
                     tags.push(buffer.trim());
                     buffer = '';
                 }

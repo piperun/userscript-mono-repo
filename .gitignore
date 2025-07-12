@@ -3,3 +3,6 @@
 *.erb
 *.css
 !*.user.js
+
+*.log
+*.rules

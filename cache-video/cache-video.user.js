@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      0.1
 // @description  Caches videos on iwara.tv to avoid bandwidth limitations.
-// @author       You
+// @author       Piperun
 // @noframes
 // @match        *://*.iwara.tv/*
 // @grant        unsafe-eval

@@ -1,5 +1,6 @@
 // ==UserScript==
 // @name         Iwara NeoUI
+// @namespace    neoUI-iwara
 // @version      0.2.0
 // @description  Enhanced UI for Iwara with tabbed layout, theater mode, customizable sections, and improved video page experience.
 // @author       Piperun

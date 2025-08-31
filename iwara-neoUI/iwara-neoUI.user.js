@@ -1,8 +1,7 @@
 // ==UserScript==
-// @name         Iwara Tweaks
-// @namespace    https://trae.ai
-// @version      0.1.0
-// @description  Hide "Liked by" section, add Theater Mode, and provide a settings modal with a header button before the coin indicator.
+// @name         Iwara NeoUI
+// @version      0.2.0
+// @description  Enhanced UI for Iwara with tabbed layout, theater mode, customizable sections, and improved video page experience.
 // @author       Piperun
 // @license      LGPL-3.0-or-later
 // @match        https://www.iwara.tv/*
@@ -48,6 +47,9 @@
     document.documentElement.appendChild(s);
     return s;
   };
+
+  // Persistent observer for Likes relocation (initialized only when new UI is active)
+  let __itwLikesObserver = null;
 
   // ---- Storage (GM or localStorage fallback) ----
   const store = {
@@ -136,6 +138,32 @@
     .itw-panels { padding-top:12px; }
     .itw-panel { display:none; }
     .itw-panel.active { display:block; }
+    /* Safety: if for any reason tabs markup lingers but layout class is absent, hide the UI */
+    body:not(.itw-tabs-active) .itw-tabbar, body:not(.itw-tabs-active) .itw-panels { display:none !important; }
+
+    /* Force visibility for Likes content inside the Likes panel */
+    body.itw-tabs-active .itw-panel-likes .itw-liked-by,
+    body.itw-tabs-active .itw-panel-likes .block,
+    body.itw-tabs-active .itw-panel-likes .block__content,
+    body.itw-tabs-active .itw-panel-likes .likesList { display:block !important; visibility:visible !important; opacity:1 !important; height:auto !important; max-height:none !important; min-height:auto !important; width:auto !important; min-width:0 !important; }
+    /* Two-row layout: users row + pagination row */
+    body.itw-tabs-active .itw-panel-likes .block { display:flex !important; flex-direction:column !important; gap:16px !important; }
+    /* Override Bootstrap row layout for horizontal scrolling */
+    body.itw-tabs-active .itw-panel-likes .likesList .row { display:flex !important; flex-direction:row !important; flex-wrap:nowrap !important; gap:16px !important; overflow-x:auto !important; padding:8px 0 !important; margin:0 !important; }
+    /* Override Bootstrap columns to become flex items */
+    body.itw-tabs-active .itw-panel-likes .likesList .row > [class*="col-"] { flex:0 0 auto !important; width:160px !important; max-width:160px !important; min-width:160px !important; padding:0 !important; }
+    /* Individual user items - compact horizontal cards */
+    body.itw-tabs-active .itw-panel-likes .likesList__item { display:block !important; width:100% !important; height:100% !important; padding:8px 12px !important; background:rgba(255,255,255,0.05) !important; border-radius:8px !important; text-decoration:none !important; box-sizing:border-box !important; }
+    /* Inner content layout for anchor elements */
+    body.itw-tabs-active .itw-panel-likes .likesList__item > * { display:flex !important; }
+    /* Pagination row - centered below users */
+    body.itw-tabs-active .itw-panel-likes .pagination { display:flex !important; justify-content:center !important; margin-top:8px !important; }
+    /* Ensure user avatars are properly sized */
+    body.itw-tabs-active .itw-panel-likes .likesList img { width:60px !important; height:60px !important; border-radius:50% !important; object-fit:cover !important; }
+    /* Username styling for horizontal scrolling layout */
+    body.itw-tabs-active .itw-panel-likes .likesList .username,
+    body.itw-tabs-active .itw-panel-likes .likesList a,
+    body.itw-tabs-active .itw-panel-likes .likesList [class*="name"] { }
   `);
 
   // ---- Modal creation ----
@@ -185,12 +213,18 @@
       settings.theaterMode = modalEl.querySelector('#itw-theater')?.checked ?? settings.theaterMode;
       settings.newUI = modalEl.querySelector('#itw-new-ui')?.checked ?? settings.newUI;
       const hadTabs = !!document.querySelector('.itw-tabbar');
+      const newUiChanged = prev.newUI !== settings.newUI;
       await saveSettings();
       applySettings();
       // If staying in New UI and tab composition changed, rebuild tabs
       const tabsChanged = prev.showLikesTab !== settings.showLikesTab || prev.showRecsTab !== settings.showRecsTab;
-      if (hadTabs && settings.newUI && tabsChanged) {
+      if (!newUiChanged && hadTabs && settings.newUI && tabsChanged) {
         teardownVideoTabs();
+      }
+      if (newUiChanged) {
+        // Force a single reload to guarantee full revert/apply of layout across SPA hydration
+        location.reload();
+        return;
       }
       applyUiMode();
       toggleModal(false);
@@ -281,6 +315,8 @@
       if (now !== lastUrl) {
         lastUrl = now;
         reanchor();
+        // Ensure UI mode matches current settings and page type on route change
+        applyUiMode();
       }
     }, 700);
 
@@ -304,6 +340,11 @@
       const container = likesList.closest('.block, .contentBlock, .block--padding, .card, .panel') || likesList.parentElement;
       if (container) {
         container.classList.add('itw-liked-by');
+        // If tabs are active and Likes tab is shown, move into the Likes panel
+        const likesPanel = settings.newUI && document.querySelector('.itw-panel-likes');
+        if (likesPanel && settings.showLikesTab && !likesPanel.contains(container)) {
+          likesPanel.append(container);
+        }
         return container;
       }
     }
@@ -315,11 +356,19 @@
       const text = (title?.textContent || '').trim().toLowerCase();
       if (text && LIKED_BY_TEXTS.some(t => text.includes(t))) {
         el.classList.add('itw-liked-by');
+        const likesPanel = settings.newUI && document.querySelector('.itw-panel-likes');
+        if (likesPanel && settings.showLikesTab && !likesPanel.contains(el)) {
+          likesPanel.append(el);
+        }
         return el;
       }
       const avatars = el.querySelectorAll('img[alt*="avatar" i], img[alt*="user" i], img[referrerpolicy], .avatar');
       if (avatars.length >= 6 && el.querySelectorAll('button, a').length < 6) {
         el.classList.add('itw-liked-by');
+        const likesPanel = settings.newUI && document.querySelector('.itw-panel-likes');
+        if (likesPanel && settings.showLikesTab && !likesPanel.contains(el)) {
+          likesPanel.append(el);
+        }
         return el;
       }
     }
@@ -328,7 +377,8 @@
 
   const applyHideLikedBy = () => {
     const root = document.documentElement;
-    const hide = settings.newUI ? !settings.showLikesTab : !!settings.hideLikedBy;
+    // Vanilla mode should be vanilla: never hide on newUI=false
+    const hide = settings.newUI ? !settings.showLikesTab : false;
     root.classList.toggle('itw-hide-liked-by', hide);
   };
 
@@ -377,7 +427,9 @@
   // ---- Page type detection ----
   const isVideoPage = () => {
     // Quick route-based hint
-    if (/\/video(s)?\//i.test(location.pathname)) return true;
+    const path = location.pathname;
+    if (/^\/(video|videos)\//i.test(path)) return true;
+    if (/^\/(search|users|image|images|posts|forums|messages|notifications|settings|login|register)\b/i.test(path)) return false;
     // Structural markers: presence of a player and typical video-page sections
     const hasPlayer = !!document.querySelector('.page-video__player, .plyr__video-wrapper, .video-js, .jwplayer, [data-plyr], video');
     const hasMarkers = !!document.querySelector('.page-video__details, .moreFromUser, .moreLikeThis, .page-video__bottom, .page-video__tags, #comments, .comments');
@@ -387,6 +439,12 @@
   // ---- Tabs: About / Uploads / Recommended / Likes / Comments ----
   const setupVideoTabs = () => {
     try {
+      // Do not build tabs in vanilla mode
+      if (!settings.newUI) return;
+      // Safety: if previous class lingered but no UI is present, clear it
+      if (!document.querySelector('.itw-tabbar') && !document.querySelector('.itw-panels')) {
+        document.body.classList.remove('itw-tabs-active');
+      }
       if (document.querySelector('.itw-tabbar')) return; // already set up
       if (!isVideoPage()) return; // only on actual video pages
 
@@ -469,10 +527,89 @@
         recsPanel.append(block);
       }
 
-      // Likes
-      let likesSection = dom.qs('.likesList')?.closest('.block, .contentBlock, .block--padding, .card, .panel') || findLikedBySection();
-      if (likesSection && settings.showLikesTab) {
-        likesPanel.append(likesSection);
+      // Likes: robust relocation (title + list) with persistent watcher
+      const nearestCommonAncestor = (a, b) => {
+        if (!a || !b) return null;
+        const aChain = new Set();
+        for (let n = a; n; n = n.parentElement) aChain.add(n);
+        for (let n = b; n; n = n.parentElement) if (aChain.has(n)) return n;
+        return null;
+      };
+      const moveLikesIntoPanel = () => {
+        if (!settings.showLikesTab) return;
+        const likesPanelNow = document.querySelector('.itw-panel-likes');
+        if (!likesPanelNow) return;
+        // Prefer structural hook
+        const list = document.querySelector('.likesList');
+        const title = [...document.querySelectorAll('.text--h3, .text.text--h3, h2, h3, .text.mb-2.text--h3.text--bold')]
+          .find(el => /liked by/i.test(el.textContent || ''));
+        let block = null;
+        // 1) If title and list share a .block__content ancestor, move that
+        const listBC = list?.closest('.block__content') || null;
+        const titleBC = title?.closest('.block__content') || null;
+        if (listBC && titleBC && listBC === titleBC) block = listBC;
+        // 2) Else, use nearest common ancestor if reasonable
+        if (!block && list && title) {
+          const nca = nearestCommonAncestor(list, title);
+          if (nca && !nca.classList.contains('itw-panels') && nca !== document.body) block = nca;
+        }
+        // 3) Else, prefer .block__content of either node
+        if (!block && listBC) block = listBC;
+        if (!block && titleBC) block = titleBC;
+        // 4) Else, fall back to typical blocks
+        if (!block && list) {
+          block = list.closest('.block, .contentBlock, .block--padding, .card, .panel')
+               || (title ? title.parentElement : null)
+               || list.parentElement
+               || list;
+        }
+        if (!block && title) {
+          block = title.closest('.block, .contentBlock, .block--padding, .card, .panel') || title.parentElement || title;
+        }
+        // If we ended up at an inner .block__content, prefer its outer block/card container
+        if (block && block.matches('.block__content') && block.parentElement && block.parentElement.matches('.block, .contentBlock, .block--padding, .card, .panel, .section')) {
+          block = block.parentElement;
+        }
+        // If list exists but is empty, defer move until populated (site may lazy-render)
+        const hasListContent = !!list && (list.childElementCount > 0 || list.querySelector('*'));
+        if (!likesPanelNow.contains(block || document.createElement('div')) && list && !hasListContent) return;
+        if (block) {
+          try { block.classList.add('itw-liked-by'); } catch {}
+          const unhideDeep = (rootEl) => {
+            const stack = [rootEl];
+            while (stack.length) {
+              const el = stack.pop();
+              if (!el || el.nodeType !== 1) continue;
+              if (el.hasAttribute('hidden')) el.removeAttribute('hidden');
+              if (el.style) {
+                if (el.style.display === 'none') el.style.display = '';
+                if (el.style.visibility === 'hidden') el.style.visibility = '';
+                if (el.style.opacity === '0') el.style.opacity = '';
+                if (el.style.height === '0px') el.style.height = '';
+                if (el.style.maxHeight === '0px') el.style.maxHeight = '';
+              }
+              stack.push(...el.children);
+            }
+          };
+          unhideDeep(block);
+          if (!likesPanelNow.contains(block)) likesPanelNow.append(block);
+        }
+      };
+
+      // Initial attempts
+      moveLikesIntoPanel();
+      // Keep trying as site re-renders/paginates the Likes block
+      if (__itwLikesObserver) { try { __itwLikesObserver.disconnect(); } catch {} }
+      __itwLikesObserver = new MutationObserver(() => moveLikesIntoPanel());
+      __itwLikesObserver.observe(document.body, { childList: true, subtree: true });
+
+      // Ensure late-loaded Likes populate into the panel as soon as they appear
+      if (settings.showLikesTab) {
+        (async () => {
+          const node = await waitFor('.likesList, .itw-liked-by', { timeout: 20000, interval: 250 });
+          if (!node) return;
+          moveLikesIntoPanel();
+        })();
       }
 
       // Mount (already mounted above)
@@ -500,7 +637,7 @@
       dom.on(aboutTab, 'click', () => activate(aboutTab));
       dom.on(uploadsTab, 'click', () => activate(uploadsTab));
       if (settings.showRecsTab) dom.on(recsTab, 'click', () => activate(recsTab));
-      if (settings.showLikesTab) dom.on(likesTab, 'click', () => activate(likesTab));
+      if (settings.showLikesTab) dom.on(likesTab, 'click', () => { moveLikesIntoPanel(); activate(likesTab); });
       dom.on(commentsTab, 'click', () => activate(commentsTab));
 
       document.body.classList.add('itw-tabs-active');
@@ -513,7 +650,7 @@
     try {
       const tabbar = document.querySelector('.itw-tabbar');
       const panels = document.querySelector('.itw-panels');
-      if (!tabbar && !panels) return; // nothing to do
+      // Do NOT return early — always ensure we clear layout class below
 
       const mainCol = dom.qs('.col-12.col-md-9') || dom.qs('.page-video__content') || dom.qs('[class*="col-"][class*="md-9"]') || document.body;
       const sidebar = document.querySelector('.page-video__sidebar');
@@ -523,43 +660,39 @@
         if (aboutBody) {
           [...aboutBody.children].forEach(node => mainCol.appendChild(node));
         }
-        const commentsPanel = panels.querySelector('.itw-panel-comments');
-        if (commentsPanel) {
-          [...commentsPanel.children].forEach(node => mainCol.appendChild(node));
-        }
         const uploadsPanel = panels.querySelector('.itw-panel-uploads');
-        if (uploadsPanel) {
-          const moreFrom = uploadsPanel.querySelector('.moreFromUser');
-          const block = moreFrom?.closest('.block, .contentBlock, .panel, .card');
-          if (block && sidebar) sidebar.appendChild(block);
-          else if (uploadsPanel.children.length) {
-            [...uploadsPanel.children].forEach(node => (sidebar || mainCol).appendChild(node));
-          }
+        if (uploadsPanel && uploadsPanel.children.length) {
+          [...uploadsPanel.children].forEach(node => mainCol.appendChild(node));
         }
         const recsPanel = panels.querySelector('.itw-panel-recs');
-        if (recsPanel) {
-          const moreLike = recsPanel.querySelector('.moreLikeThis');
-          const block = moreLike?.closest('.block, .contentBlock, .panel, .card, .section');
-          if (block && mainCol) mainCol.appendChild(block);
+        if (recsPanel && recsPanel.children.length) {
+          const block = recsPanel.querySelector('.itw-recs');
+          if (block && sidebar) sidebar.appendChild(block);
           else if (recsPanel.children.length) {
-            [...recsPanel.children].forEach(node => mainCol.appendChild(node));
+            [...recsPanel.children].forEach(node => (sidebar || mainCol).appendChild(node));
           }
         }
         const likesPanel = panels.querySelector('.itw-panel-likes');
-        if (likesPanel) {
-          const likesList = likesPanel.querySelector('.likesList');
-          const block = likesList?.closest('.block, .contentBlock, .block--padding, .card, .panel');
+        if (likesPanel && likesPanel.children.length) {
+          const block = likesPanel.querySelector('.itw-liked-by');
           if (block && sidebar) sidebar.appendChild(block);
           else if (likesPanel.children.length) {
             [...likesPanel.children].forEach(node => (sidebar || mainCol).appendChild(node));
           }
         }
+        const commentsPanel = panels.querySelector('.itw-panel-comments');
+        if (commentsPanel && commentsPanel.children.length) {
+          [...commentsPanel.children].forEach(node => mainCol.appendChild(node));
+        }
         panels.remove();
       }
       if (tabbar) tabbar.remove();
+      // Always clear the layout class to avoid full-width/hidden-sidebar in vanilla mode
       document.body.classList.remove('itw-tabs-active');
     } catch (e) {
       console.warn('[Iwara Tweaks] Tabs teardown skipped:', e);
+      // Still ensure layout class is not left behind on error paths
+      document.body.classList.remove('itw-tabs-active');
     }
   };
 
@@ -568,6 +701,11 @@
       setupVideoTabs();
     } else {
       teardownVideoTabs();
+      // Safety: explicitly ensure classes are removed when new UI is disabled
+      document.body.classList.remove('itw-tabs-active');
+      document.body.classList.remove('itw-theater');
+      // Ensure Likes observer is stopped in vanilla mode
+      if (__itwLikesObserver) { try { __itwLikesObserver.disconnect(); } catch {} __itwLikesObserver = null; }
     }
   };
 
@@ -582,6 +720,10 @@
     applyUiMode();
 
     const mo = new MutationObserver(() => {
+      // Always correct stray class if UI not present
+      if (!document.querySelector('.itw-tabbar') && !document.querySelector('.itw-panels')) {
+        document.body.classList.remove('itw-tabs-active');
+      }
       // If we navigated away from a video page, ensure tabs are removed
       if (!isVideoPage() && document.querySelector('.itw-tabbar')) teardownVideoTabs();
 
@@ -590,8 +732,21 @@
         if (!document.querySelector('.itw-recs')) findRecsSection();
         if (!document.querySelector('.itw-player-wrap')) applyTheater();
         if (settings.newUI && !document.querySelector('.itw-tabbar')) setupVideoTabs();
+        // Late-arriving Likes: move it into panel when it appears
+        if (settings.newUI && settings.showLikesTab) {
+          const likesPanel = document.querySelector('.itw-panel-likes');
+          const likedNode = document.querySelector('.itw-liked-by') || document.querySelector('.likesList');
+          if (likesPanel && likedNode) {
+            const block = likedNode.classList?.contains('itw-liked-by') ? likedNode : (likedNode.closest('.block, .contentBlock, .block--padding, .card, .panel') || likedNode);
+            if (!likesPanel.contains(block)) likesPanel.append(block);
+          }
+        }
       }
-      if (!settings.newUI && document.querySelector('.itw-tabbar')) teardownVideoTabs();
+      // In vanilla mode, ensure no tabs or theater layout persist
+      if (!settings.newUI) {
+        if (document.querySelector('.itw-tabbar')) teardownVideoTabs();
+        document.body.classList.remove('itw-theater');
+      }
     });
     mo.observe(document.documentElement, { childList: true, subtree: true });
   })();

@@ -15,8 +15,8 @@
 
 (() => {
   'use strict';
-  if (window.__IWARA_TWEAKS_ACTIVE) return;
-  window.__IWARA_TWEAKS_ACTIVE = true;
+  if (window.__IWARA_NEOUI_ACTIVE) return;
+  window.__IWARA_NEOUI_ACTIVE = true;
 
   // ---- Utilities ----
   const dom = {
@@ -186,7 +186,7 @@
     modalEl = dom.el('<div class="itw-modal" role="dialog" aria-modal="true"></div>');
 
     const content = dom.el('<div></div>');
-    content.appendChild(dom.el('<h3>Iwara Tweaks — Settings</h3>'));
+    content.appendChild(dom.el('<h3>Iwara NeoUI — Settings</h3>'));
 
     // Tabs visibility
     const likesTabRow = createSwitch('itw-show-likes', settings.showLikesTab, 'Show "Likes" tab');
@@ -243,7 +243,7 @@
   // ---- Insert header button (before coin indicator when possible) ----
   const GEAR_SVG = '<svg class="itw-gear" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14,12.94a7.43,7.43,0,0,0,.05-.94,7.43,7.43,0,0,0-.05-.94l2-1.56a.5.5,0,0,0,.12-.64l-1.9-3.29a.5.5,0,0,0-.6-.22l-2.36,1a7.39,7.39,0,0,0-1.63-.94l-.36-2.5A.5.5,0,0,0,12.47,2H9.53a.5.5,0,0,0-.5.42l-.36,2.5a7.39,7.39,0,0,0-1.63.94l-2.36-1a.5.5,0,0,0-.6.22L2.22,8.88a.5.5,0,0,0,.12.64l2,1.56a7.43,7.43,0,0,0-.05.94,7.43,7.43,0,0,0,.05.94l-2,1.56a.5.5,0,0,0-.12.64l1.9,3.29a.5.5,0,0,0,.6.22l2.36-1a7.39,7.39,0,0,0,1.63.94l.36,2.5a.5.5,0,0,0,.5.42h2.94a.5.5,0,0,0,.5-.42l.36-2.5a7.39,7.39,0,0,0,1.63-.94l2.36,1a.5.5,0,0,0,.6-.22l1.9-3.29a.5.5,0,0,0-.12-.64ZM11,15.5A3.5,3.5,0,1,1,14.5,12,3.5,3.5,0,0,1,11,15.5Z"/></svg>';
 
-  const makeHeaderBtn = () => dom.el(`<button id="itw-settings-btn" class="itw-btn" type="button" title="Iwara Tweaks">${GEAR_SVG}<span>Options</span></button>`);
+  const makeHeaderBtn = () => dom.el(`<button id="itw-settings-btn" class="itw-btn" type="button" title="Iwara NeoUI">${GEAR_SVG}<span>Options</span></button>`);
 
   const insertNextToSearch = (btn) => {
     const header = document.querySelector('header, nav[role="navigation"], .header, [class*="header"]');
@@ -469,7 +469,7 @@
       panels.append(aboutPanel, uploadsPanel, recsPanel, likesPanel, commentsPanel);
 
       // Tab bar
-      const tabbar = dom.el('<div class="itw-tabbar" role="tablist" aria-label="Iwara Tweaks Tabs"></div>');
+      const tabbar = dom.el('<div class="itw-tabbar" role="tablist" aria-label="Iwara NeoUI Tabs"></div>');
       const makeTab = (id, text, selected=false) => dom.el(`<button class="itw-tab" role="tab" id="itw-tab-${id}" aria-selected="${selected}" aria-controls="itw-panel-${id}">${text}</button>`);
       const aboutTab = makeTab('about', 'About', true);
       const uploadsTab = makeTab('uploads', 'Uploads');
@@ -643,7 +643,7 @@
 
       document.body.classList.add('itw-tabs-active');
     } catch (e) {
-      console.warn('[Iwara Tweaks] Tabs setup skipped:', e);
+      console.warn('[Iwara NeoUI] Tabs setup skipped:', e);
     }
   };
 
@@ -691,7 +691,7 @@
       // Always clear the layout class to avoid full-width/hidden-sidebar in vanilla mode
       document.body.classList.remove('itw-tabs-active');
     } catch (e) {
-      console.warn('[Iwara Tweaks] Tabs teardown skipped:', e);
+      console.warn('[Iwara NeoUI] Tabs teardown skipped:', e);
       // Still ensure layout class is not left behind on error paths
       document.body.classList.remove('itw-tabs-active');
     }

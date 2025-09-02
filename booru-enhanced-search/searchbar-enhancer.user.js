@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Booru Search Tag Enhancer (Universal)
-// @namespace    http://tampermonkey.net/
+// @namespace    booru-tag-search
 // @version      2.1
 // @description  Modernize and enhance search bar and tag input for booru sites, with modular site-specific configurations, dynamic cheat sheets with caching, e621-specific order syntax, and improved layout for rule34.xxx and e621.net
 // @author       Piperun

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Iwara NeoUI
 // @namespace    neoUI-iwara
-// @version      0.2.0
+// @version      0.2.1
 // @description  Enhanced UI for Iwara with tabbed layout, theater mode, customizable sections, and improved video page experience.
 // @author       Piperun
 // @license      LGPL-3.0-or-later
@@ -18,6 +18,104 @@
   if (window.__IWARA_NEOUI_ACTIVE) return;
   window.__IWARA_NEOUI_ACTIVE = true;
 
+  // ---- Constants ----
+  const TIMEOUTS = {
+    WAIT_FOR: 20000,
+    POLL_INTERVAL: 250,
+    SLEEP_SHORT: 500,
+    ASYNC_WAIT: 1000
+  };
+
+  const SELECTORS = {
+    VIDEO_COL: '.col-12.col-md-9',
+    PAGE_VIDEO_CONTENT: '.page-video__content',
+    COL_MD_9: '[class*="col-"][class*="md-9"]',
+    SIDEBAR: '.page-video__sidebar',
+    LIKES_LIST: '.likesList',
+    LIKED_BY: '.itw-liked-by',
+    RECS: '.itw-recs',
+    PLAYER_WRAP: '.itw-player-wrap',
+    TABBAR: '.itw-tabbar',
+    PANELS: '.itw-panels',
+    COIN_INDICATOR: '.navbar__coin'
+  };
+
+  const CSS_CLASSES = {
+    TABS_ACTIVE: 'itw-tabs-active',
+    THEATER: 'itw-theater',
+    ACTIVE: 'active'
+  };
+
+  // ---- DOM Cache ----
+  const domCache = {
+    cache: new Map(),
+    get(selector, root = document) {
+      const key = `${selector}:${root === document ? 'doc' : 'custom'}`;
+      if (this.cache.has(key)) {
+        const cached = this.cache.get(key);
+        // Verify element is still in DOM
+        if (cached && cached.isConnected) {
+          return cached;
+        }
+        this.cache.delete(key);
+      }
+      const element = root.querySelector(selector);
+      if (element) {
+        this.cache.set(key, element);
+      }
+      return element;
+    },
+    clear() {
+      this.cache.clear();
+    },
+    invalidate(selector) {
+      const keysToDelete = [];
+      for (const key of this.cache.keys()) {
+        if (key.startsWith(selector + ':')) {
+          keysToDelete.push(key);
+        }
+      }
+      keysToDelete.forEach(key => this.cache.delete(key));
+    }
+  };
+
+  // ---- Observer Manager ----
+  const observerManager = {
+    observers: new Map(),
+    
+    create(name, callback, options = { childList: true, subtree: true }) {
+      if (this.observers.has(name)) {
+        this.disconnect(name);
+      }
+      
+      const observer = new MutationObserver(callback);
+      this.observers.set(name, observer);
+      return observer;
+    },
+    
+    observe(name, target = document.documentElement, options = { childList: true, subtree: true }) {
+      const observer = this.observers.get(name);
+      if (observer) {
+        observer.observe(target, options);
+      }
+    },
+    
+    disconnect(name) {
+      const observer = this.observers.get(name);
+      if (observer) {
+        observer.disconnect();
+        this.observers.delete(name);
+      }
+    },
+    
+    disconnectAll() {
+      for (const [name, observer] of this.observers) {
+        observer.disconnect();
+      }
+      this.observers.clear();
+    }
+  };
+
   // ---- Utilities ----
   const dom = {
     el(html) {
@@ -30,9 +128,9 @@
     qsa(sel, root = document) { return [...root.querySelectorAll(sel)]; },
   };
 
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const sleep = (ms = TIMEOUTS.SLEEP_SHORT) => new Promise(r => setTimeout(r, ms));
 
-  const waitFor = async (selector, { root = document, timeout = 10000, interval = 200 } = {}) => {
+  const waitFor = async (selector, { root = document, timeout = TIMEOUTS.WAIT_FOR, interval = TIMEOUTS.POLL_INTERVAL } = {}) => {
     const end = Date.now() + timeout;
     while (Date.now() < end) {
       const node = root.querySelector(selector);
@@ -76,16 +174,47 @@
   let settings = { ...DEFAULTS };
 
   const loadSettings = async () => {
-    const saved = await store.get('settings', {});
-    settings = { ...DEFAULTS, ...(saved || {}) };
-    // Migration: if legacy hideLikedBy was true and showLikesTab not explicitly set, hide the Likes tab by default
-    if (saved && 'hideLikedBy' in saved && !('showLikesTab' in saved)) {
-      settings.showLikesTab = !saved.hideLikedBy;
+    try {
+      const saved = await store.get('settings', {});
+      
+      // Validate saved settings
+      if (typeof saved !== 'object' || saved === null) {
+        console.warn('[Iwara NeoUI] Invalid settings format, using defaults');
+        settings = { ...DEFAULTS };
+        return;
+      }
+      
+      // Validate individual setting types
+      const validatedSettings = { ...DEFAULTS };
+      for (const [key, value] of Object.entries(saved)) {
+        if (key in DEFAULTS) {
+          const expectedType = typeof DEFAULTS[key];
+          if (typeof value === expectedType) {
+            validatedSettings[key] = value;
+          } else {
+            console.warn(`[Iwara NeoUI] Invalid type for setting '${key}', expected ${expectedType}, got ${typeof value}`);
+          }
+        }
+      }
+      
+      settings = validatedSettings;
+      
+      // Migration: if legacy hideLikedBy was true and showLikesTab not explicitly set, hide the Likes tab by default
+      if (saved && 'hideLikedBy' in saved && !('showLikesTab' in saved)) {
+        settings.showLikesTab = !saved.hideLikedBy;
+      }
+    } catch (e) {
+      console.warn('[Iwara NeoUI] loadSettings failed:', e);
+      settings = { ...DEFAULTS };
     }
   };
 
   const saveSettings = async () => {
-    await store.set('settings', settings);
+    try {
+      await store.set('settings', settings);
+    } catch (e) {
+      console.warn('[Iwara NeoUI] saveSettings failed:', e);
+    }
   };
 
   // ---- CSS for features ----
@@ -181,57 +310,62 @@
   `);
 
   const ensureModal = () => {
-    if (modalEl) return modalEl;
-    modalBackdrop = dom.el('<div class="itw-modal-backdrop"></div>');
-    modalEl = dom.el('<div class="itw-modal" role="dialog" aria-modal="true"></div>');
+    try {
+      if (modalEl) return modalEl;
+      modalBackdrop = dom.el('<div class="itw-modal-backdrop"></div>');
+      modalEl = dom.el('<div class="itw-modal" role="dialog" aria-modal="true"></div>');
 
-    const content = dom.el('<div></div>');
-    content.appendChild(dom.el('<h3>Iwara NeoUI — Settings</h3>'));
+      const content = dom.el('<div></div>');
+      content.appendChild(dom.el('<h3>Iwara NeoUI — Settings</h3>'));
 
-    // Tabs visibility
-    const likesTabRow = createSwitch('itw-show-likes', settings.showLikesTab, 'Show "Likes" tab');
-    const recsTabRow = createSwitch('itw-show-recs', settings.showRecsTab, 'Show "Recommended" tab');
+      // Tabs visibility
+      const likesTabRow = createSwitch('itw-show-likes', settings.showLikesTab, 'Show "Likes" tab');
+      const recsTabRow = createSwitch('itw-show-recs', settings.showRecsTab, 'Show "Recommended" tab');
 
-    const theaterRow = createSwitch('itw-theater', settings.theaterMode, 'Enable Theater Mode');
-    const newUiRow = createSwitch('itw-new-ui', settings.newUI, 'Enable new UI (tabs + full-width video)');
+      const theaterRow = createSwitch('itw-theater', settings.theaterMode, 'Enable Theater Mode');
+      const newUiRow = createSwitch('itw-new-ui', settings.newUI, 'Enable new UI (tabs + full-width video)');
 
-    const actions = dom.el('<div class="itw-actions"></div>');
-    const closeBtn = dom.el('<button class="itw-btn" type="button">Close</button>');
-    const saveBtn = dom.el('<button class="itw-btn" type="button">Save</button>');
-    actions.append(closeBtn, saveBtn);
+      const actions = dom.el('<div class="itw-actions"></div>');
+      const closeBtn = dom.el('<button class="itw-btn" type="button">Close</button>');
+      const saveBtn = dom.el('<button class="itw-btn" type="button">Save</button>');
+      actions.append(closeBtn, saveBtn);
 
-    content.append(likesTabRow, recsTabRow, theaterRow, newUiRow, actions);
-    modalEl.append(content);
+      content.append(likesTabRow, recsTabRow, theaterRow, newUiRow, actions);
+      modalEl.append(content);
 
-    document.body.append(modalBackdrop, modalEl);
+      document.body.append(modalBackdrop, modalEl);
 
-    dom.on(closeBtn, 'click', () => toggleModal(false));
-    dom.on(modalBackdrop, 'click', () => toggleModal(false));
-    dom.on(saveBtn, 'click', async () => {
-      const prev = { newUI: settings.newUI, showLikesTab: settings.showLikesTab, showRecsTab: settings.showRecsTab };
-      settings.showLikesTab = modalEl.querySelector('#itw-show-likes')?.checked ?? settings.showLikesTab;
-      settings.showRecsTab = modalEl.querySelector('#itw-show-recs')?.checked ?? settings.showRecsTab;
-      settings.theaterMode = modalEl.querySelector('#itw-theater')?.checked ?? settings.theaterMode;
-      settings.newUI = modalEl.querySelector('#itw-new-ui')?.checked ?? settings.newUI;
-      const hadTabs = !!document.querySelector('.itw-tabbar');
-      const newUiChanged = prev.newUI !== settings.newUI;
-      await saveSettings();
-      applySettings();
-      // If staying in New UI and tab composition changed, rebuild tabs
-      const tabsChanged = prev.showLikesTab !== settings.showLikesTab || prev.showRecsTab !== settings.showRecsTab;
-      if (!newUiChanged && hadTabs && settings.newUI && tabsChanged) {
-        teardownVideoTabs();
-      }
-      if (newUiChanged) {
-        // Force a single reload to guarantee full revert/apply of layout across SPA hydration
-        location.reload();
-        return;
-      }
-      applyUiMode();
-      toggleModal(false);
-    });
+      dom.on(closeBtn, 'click', () => toggleModal(false));
+      dom.on(modalBackdrop, 'click', () => toggleModal(false));
+      dom.on(saveBtn, 'click', async () => {
+        const prev = { newUI: settings.newUI, showLikesTab: settings.showLikesTab, showRecsTab: settings.showRecsTab };
+        settings.showLikesTab = modalEl.querySelector('#itw-show-likes')?.checked ?? settings.showLikesTab;
+        settings.showRecsTab = modalEl.querySelector('#itw-show-recs')?.checked ?? settings.showRecsTab;
+        settings.theaterMode = modalEl.querySelector('#itw-theater')?.checked ?? settings.theaterMode;
+        settings.newUI = modalEl.querySelector('#itw-new-ui')?.checked ?? settings.newUI;
+        const hadTabs = !!document.querySelector('.itw-tabbar');
+        const newUiChanged = prev.newUI !== settings.newUI;
+        await saveSettings();
+        applySettings();
+        // If staying in New UI and tab composition changed, rebuild tabs
+        const tabsChanged = prev.showLikesTab !== settings.showLikesTab || prev.showRecsTab !== settings.showRecsTab;
+        if (!newUiChanged && hadTabs && settings.newUI && tabsChanged) {
+          teardownVideoTabs();
+        }
+        if (newUiChanged) {
+          // Force a single reload to guarantee full revert/apply of layout across SPA hydration
+          location.reload();
+          return;
+        }
+        applyUiMode();
+        toggleModal(false);
+      });
 
-    return modalEl;
+      return modalEl;
+    } catch (e) {
+      console.warn('[Iwara NeoUI] ensureModal failed:', e);
+      return null;
+    }
   };
 
   const toggleModal = (show) => {
@@ -275,55 +409,61 @@
   };
 
   const ensureHeaderButton = async () => {
-    let btn = document.getElementById('itw-settings-btn');
-    if (!btn) {
-      btn = makeHeaderBtn();
-      dom.on(btn, 'click', () => { ensureModal(); toggleModal(true); });
-      btn.classList.add('itw-float');
-      document.body.appendChild(btn);
-    }
-
-    let debounce = null;
-
-    const reanchor = () => {
-      // Ensure the button exists in the DOM
-      if (!btn.isConnected) document.body.appendChild(btn);
-
-      const { placed } = insertNextToSearch(btn);
-      if (placed) {
-        btn.classList.remove('itw-float');
-        btn.classList.add('itw-in-header');
-      } else {
+    try {
+      let btn = document.getElementById('itw-settings-btn');
+      if (!btn) {
+        btn = makeHeaderBtn();
+        dom.on(btn, 'click', () => { ensureModal(); toggleModal(true); });
         btn.classList.add('itw-float');
-        btn.classList.remove('itw-in-header');
+        document.body.appendChild(btn);
       }
-    };
 
-    // Initial attempt
-    reanchor();
+      let debounce = null;
 
-    // Observe DOM continuously (SPA hydration or header rerenders)
-    const mo = new MutationObserver(() => {
-      if (debounce) return;
-      debounce = setTimeout(() => { debounce = null; reanchor(); }, 300);
-    });
-    mo.observe(document.documentElement, { childList: true, subtree: true });
+      const reanchor = () => {
+        // Ensure the button exists in the DOM
+        if (!btn.isConnected) document.body.appendChild(btn);
 
-    // Handle SPA route changes (URL swap without full reload)
-    let lastUrl = location.href;
-    setInterval(() => {
-      const now = location.href;
-      if (now !== lastUrl) {
-        lastUrl = now;
-        reanchor();
-        // Ensure UI mode matches current settings and page type on route change
-        applyUiMode();
-      }
-    }, 700);
+        const { placed } = insertNextToSearch(btn);
+        if (placed) {
+          btn.classList.remove('itw-float');
+          btn.classList.add('itw-in-header');
+        } else {
+          btn.classList.add('itw-float');
+          btn.classList.remove('itw-in-header');
+        }
+      };
 
-    // Additional safety hooks
-    window.addEventListener('load', reanchor, { once: true });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) reanchor(); });
+      // Initial attempt
+      reanchor();
+
+      // Observe DOM continuously (SPA hydration or header rerenders)
+      const mo = new MutationObserver(() => {
+        if (debounce) return;
+        debounce = setTimeout(() => { debounce = null; reanchor(); }, 300);
+      });
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+
+      // Handle SPA route changes (URL swap without full reload)
+        let lastUrl = location.href;
+        setInterval(() => {
+          const now = location.href;
+          if (now !== lastUrl) {
+            lastUrl = now;
+            domCache.clear(); // Clear cache on navigation
+            observerManager.disconnect('likes'); // Clean up page-specific observers
+            reanchor();
+            // Ensure UI mode matches current settings and page type on route change
+            applyUiMode();
+          }
+        }, 700);
+
+      // Additional safety hooks
+      window.addEventListener('load', reanchor, { once: true });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reanchor(); });
+    } catch (e) {
+      console.warn('[Iwara NeoUI] ensureHeaderButton failed:', e);
+    }
   };
 
   // ---- Liked by detection and toggle ----
@@ -335,45 +475,50 @@
   ];
 
   const findLikedBySection = () => {
-    // Prefer a structural hook used on iwara: the likes list grid
-    const likesList = dom.qs('.likesList');
-    if (likesList) {
-      const container = likesList.closest('.block, .contentBlock, .block--padding, .card, .panel') || likesList.parentElement;
-      if (container) {
-        container.classList.add('itw-liked-by');
-        // If tabs are active and Likes tab is shown, move into the Likes panel
-        const likesPanel = settings.newUI && document.querySelector('.itw-panel-likes');
-        if (likesPanel && settings.showLikesTab && !likesPanel.contains(container)) {
-          likesPanel.append(container);
+    try {
+      // Prefer a structural hook used on iwara: the likes list grid
+      const likesList = dom.qs('.likesList');
+      if (likesList) {
+        const container = likesList.closest('.block, .contentBlock, .block--padding, .card, .panel') || likesList.parentElement;
+        if (container) {
+          container.classList.add('itw-liked-by');
+          // If tabs are active and Likes tab is shown, move into the Likes panel
+          const likesPanel = settings.newUI && document.querySelector('.itw-panel-likes');
+          if (likesPanel && settings.showLikesTab && !likesPanel.contains(container)) {
+            likesPanel.append(container);
+          }
+          return container;
         }
-        return container;
       }
-    }
 
-    // Generic fallback: scan typical containers and look for a heading-like element
-    const candidates = dom.qsa('section, .section, .block, .card, .panel, div');
-    for (const el of candidates) {
-      const title = el.querySelector('h2, h3, header, .title, [class*="title"], .text--h3, .text.text--h3');
-      const text = (title?.textContent || '').trim().toLowerCase();
-      if (text && LIKED_BY_TEXTS.some(t => text.includes(t))) {
-        el.classList.add('itw-liked-by');
-        const likesPanel = settings.newUI && document.querySelector('.itw-panel-likes');
-        if (likesPanel && settings.showLikesTab && !likesPanel.contains(el)) {
-          likesPanel.append(el);
+      // Generic fallback: scan typical containers and look for a heading-like element
+      const candidates = dom.qsa('section, .section, .block, .card, .panel, div');
+      for (const el of candidates) {
+        const title = el.querySelector('h2, h3, header, .title, [class*="title"], .text--h3, .text.text--h3');
+        const text = (title?.textContent || '').trim().toLowerCase();
+        if (text && LIKED_BY_TEXTS.some(t => text.includes(t))) {
+          el.classList.add('itw-liked-by');
+          const likesPanel = settings.newUI && document.querySelector('.itw-panel-likes');
+          if (likesPanel && settings.showLikesTab && !likesPanel.contains(el)) {
+            likesPanel.append(el);
+          }
+          return el;
         }
-        return el;
-      }
-      const avatars = el.querySelectorAll('img[alt*="avatar" i], img[alt*="user" i], img[referrerpolicy], .avatar');
-      if (avatars.length >= 6 && el.querySelectorAll('button, a').length < 6) {
-        el.classList.add('itw-liked-by');
-        const likesPanel = settings.newUI && document.querySelector('.itw-panel-likes');
-        if (likesPanel && settings.showLikesTab && !likesPanel.contains(el)) {
-          likesPanel.append(el);
+        const avatars = el.querySelectorAll('img[alt*="avatar" i], img[alt*="user" i], img[referrerpolicy], .avatar');
+        if (avatars.length >= 6 && el.querySelectorAll('button, a').length < 6) {
+          el.classList.add('itw-liked-by');
+          const likesPanel = settings.newUI && document.querySelector('.itw-panel-likes');
+          if (likesPanel && settings.showLikesTab && !likesPanel.contains(el)) {
+            likesPanel.append(el);
+          }
+          return el;
         }
-        return el;
       }
+      return null;
+    } catch (e) {
+      console.warn('[Iwara NeoUI] findLikedBySection failed:', e);
+      return null;
     }
-    return null;
   };
 
   const applyHideLikedBy = () => {
@@ -385,9 +530,14 @@
 
   // Tag and hide Recommended (More like this)
   const findRecsSection = () => {
-    const el = dom.qs('.moreLikeThis') || [...document.querySelectorAll('.text--h3, h2, h3')].find(h => /more like this|recommended|related/i.test(h.textContent || ''))?.closest('.block, .contentBlock, .panel, .card, .section, .moreLikeThis');
-    if (el) { el.classList.add('itw-recs'); return el; }
-    return null;
+    try {
+      const el = dom.qs('.moreLikeThis') || [...document.querySelectorAll('.text--h3, h2, h3')].find(h => /more like this|recommended|related/i.test(h.textContent || ''))?.closest('.block, .contentBlock, .panel, .card, .section, .moreLikeThis');
+      if (el) { el.classList.add('itw-recs'); return el; }
+      return null;
+    } catch (e) {
+      console.warn('[Iwara NeoUI] findRecsSection failed:', e);
+      return null;
+    }
   };
 
   const applyHideRecs = () => {
@@ -398,14 +548,18 @@
 
   // ---- Theater Mode ----
   const applyTheater = () => {
-    const root = document.body || document.documentElement;
-    root.classList.toggle('itw-theater', !!settings.theaterMode);
+    try {
+      const root = document.body || document.documentElement;
+      root.classList.toggle('itw-theater', !!settings.theaterMode);
 
-    const knownPlayerWrap = dom.qs('.plyr__video-wrapper, .jwplayer, .video-js, .vjs, #player, .video-player, [class*="player"]');
-    if (knownPlayerWrap) knownPlayerWrap.classList.add('itw-player-wrap');
-    else {
-      const video = dom.qs('video');
-      if (video) video.closest('div')?.classList.add('itw-player-wrap');
+      const knownPlayerWrap = dom.qs('.plyr__video-wrapper, .jwplayer, .video-js, .vjs, #player, .video-player, [class*="player"]');
+      if (knownPlayerWrap) knownPlayerWrap.classList.add('itw-player-wrap');
+      else {
+        const video = dom.qs('video');
+        if (video) video.closest('div')?.classList.add('itw-player-wrap');
+      }
+    } catch (e) {
+      console.warn('[Iwara NeoUI] applyTheater failed:', e);
     }
   };
 
@@ -444,12 +598,12 @@
       if (!settings.newUI) return;
       // Safety: if previous class lingered but no UI is present, clear it
       if (!document.querySelector('.itw-tabbar') && !document.querySelector('.itw-panels')) {
-        document.body.classList.remove('itw-tabs-active');
+        document.body.classList.remove(CSS_CLASSES.TABS_ACTIVE);
       }
       if (document.querySelector('.itw-tabbar')) return; // already set up
       if (!isVideoPage()) return; // only on actual video pages
 
-      const mainCol = dom.qs('.col-12.col-md-9') || dom.qs('.page-video__content') || dom.qs('[class*="col-"][class*="md-9"]');
+      const mainCol = domCache.get(SELECTORS.VIDEO_COL) || domCache.get(SELECTORS.PAGE_VIDEO_CONTENT) || domCache.get(SELECTORS.COL_MD_9);
       if (!mainCol) return;
       // Require a real player host; do not fall back to arbitrary first child
       const playerHost = mainCol.querySelector('.page-video__player') ||
@@ -607,7 +761,7 @@
       // Ensure late-loaded Likes populate into the panel as soon as they appear
       if (settings.showLikesTab) {
         (async () => {
-          const node = await waitFor('.likesList, .itw-liked-by', { timeout: 20000, interval: 250 });
+          const node = await waitFor(`${SELECTORS.LIKES_LIST}, ${SELECTORS.LIKED_BY}`, { timeout: TIMEOUTS.WAIT_FOR, interval: TIMEOUTS.POLL_INTERVAL });
           if (!node) return;
           moveLikesIntoPanel();
         })();
@@ -641,7 +795,7 @@
       if (settings.showLikesTab) dom.on(likesTab, 'click', () => { moveLikesIntoPanel(); activate(likesTab); });
       dom.on(commentsTab, 'click', () => activate(commentsTab));
 
-      document.body.classList.add('itw-tabs-active');
+      document.body.classList.add(CSS_CLASSES.TABS_ACTIVE);
     } catch (e) {
       console.warn('[Iwara NeoUI] Tabs setup skipped:', e);
     }
@@ -649,12 +803,15 @@
 
   const teardownVideoTabs = () => {
     try {
-      const tabbar = document.querySelector('.itw-tabbar');
-      const panels = document.querySelector('.itw-panels');
+      // Clean up observers
+      observerManager.disconnect('likes');
+      
+      const tabbar = document.querySelector(SELECTORS.TABBAR);
+      const panels = document.querySelector(SELECTORS.PANELS);
       // Do NOT return early — always ensure we clear layout class below
 
-      const mainCol = dom.qs('.col-12.col-md-9') || dom.qs('.page-video__content') || dom.qs('[class*="col-"][class*="md-9"]') || document.body;
-      const sidebar = document.querySelector('.page-video__sidebar');
+      const mainCol = domCache.get(SELECTORS.VIDEO_COL) || domCache.get(SELECTORS.PAGE_VIDEO_CONTENT) || domCache.get(SELECTORS.COL_MD_9) || document.body;
+      const sidebar = domCache.get(SELECTORS.SIDEBAR);
 
       if (panels) {
         const aboutBody = panels.querySelector('.itw-about-body');
@@ -689,7 +846,7 @@
       }
       if (tabbar) tabbar.remove();
       // Always clear the layout class to avoid full-width/hidden-sidebar in vanilla mode
-      document.body.classList.remove('itw-tabs-active');
+      document.body.classList.remove(CSS_CLASSES.TABS_ACTIVE);
     } catch (e) {
       console.warn('[Iwara NeoUI] Tabs teardown skipped:', e);
       // Still ensure layout class is not left behind on error paths
@@ -720,23 +877,26 @@
     applySettings();
     applyUiMode();
 
-    const mo = new MutationObserver(() => {
-      // Always correct stray class if UI not present
-      if (!document.querySelector('.itw-tabbar') && !document.querySelector('.itw-panels')) {
-        document.body.classList.remove('itw-tabs-active');
-      }
-      // If we navigated away from a video page, ensure tabs are removed
-      if (!isVideoPage() && document.querySelector('.itw-tabbar')) teardownVideoTabs();
+    observerManager.create('main', () => {
+        // Clear cache periodically to avoid stale references
+        domCache.clear();
+        
+        // Always correct stray class if UI not present
+        if (!document.querySelector(SELECTORS.TABBAR) && !document.querySelector(SELECTORS.PANELS)) {
+          document.body.classList.remove(CSS_CLASSES.TABS_ACTIVE);
+        }
+        // If we navigated away from a video page, ensure tabs are removed
+        if (!isVideoPage() && document.querySelector('.itw-tabbar')) teardownVideoTabs();
 
       if (isVideoPage()) {
-        if (!document.querySelector('.itw-liked-by')) findLikedBySection();
-        if (!document.querySelector('.itw-recs')) findRecsSection();
-        if (!document.querySelector('.itw-player-wrap')) applyTheater();
-        if (settings.newUI && !document.querySelector('.itw-tabbar')) setupVideoTabs();
+        if (!document.querySelector(SELECTORS.LIKED_BY)) findLikedBySection();
+        if (!document.querySelector(SELECTORS.RECS)) findRecsSection();
+        if (!document.querySelector(SELECTORS.PLAYER_WRAP)) applyTheater();
+        if (settings.newUI && !document.querySelector(SELECTORS.TABBAR)) setupVideoTabs();
         // Late-arriving Likes: move it into panel when it appears
         if (settings.newUI && settings.showLikesTab) {
-          const likesPanel = document.querySelector('.itw-panel-likes');
-          const likedNode = document.querySelector('.itw-liked-by') || document.querySelector('.likesList');
+          const likesPanel = domCache.get('.itw-panel-likes');
+        const likedNode = domCache.get(SELECTORS.LIKED_BY) || domCache.get(SELECTORS.LIKES_LIST);
           if (likesPanel && likedNode) {
             const block = likedNode.classList?.contains('itw-liked-by') ? likedNode : (likedNode.closest('.block, .contentBlock, .block--padding, .card, .panel') || likedNode);
             if (!likesPanel.contains(block)) likesPanel.append(block);
@@ -746,9 +906,9 @@
       // In vanilla mode, ensure no tabs or theater layout persist
       if (!settings.newUI) {
         if (document.querySelector('.itw-tabbar')) teardownVideoTabs();
-        document.body.classList.remove('itw-theater');
+        document.body.classList.remove(CSS_CLASSES.THEATER);
       }
     });
-    mo.observe(document.documentElement, { childList: true, subtree: true });
+    observerManager.observe('main');
   })();
 })();
